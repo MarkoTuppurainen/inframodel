@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>InfraModel 4.2 Validator</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+    }
+    h1 {
+      color: #2c3e50;
+    }
+    .box {
+      border: 2px dashed #ccc;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .result {
+      background: #f4f4f4;
+      padding: 15px;
+      white-space: pre-wrap;
+    }
+    .success { color: green; }
+    .error { color: red; }
+  </style>
+</head>
+<body>
+
+<h1>InfraModel 4.2.0 Validator</h1>
+
+<p>
+Lataa XML-tiedosto tarkistettavaksi.<br />
+XML käsitellään selaimessasi. Sivu hakee vain validointiin tarvittavat skeemat ja kirjaston verkosta.
+</p>
+
+<div class="box">
+  <input type="file" id="fileInput" accept=".xml" />
+  <button onclick="validateXML()">Tarkista</button>
+</div>
+
+<div id="result" class="result"></div>
+
+<script type="module" src="app.js"></script>
+
+</body>
+</html>
