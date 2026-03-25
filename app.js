@@ -373,7 +373,7 @@ function validateSurfaceGuidelineRules(xmlDoc, xmlText, errors, warnings) {
     }
 
     if (breakLinesGroups.length > 0 || breakLines.length > 0) {
-      validateSurfaceSourceDataCoding(
+      validateSurfaceBreakLineCoding(
         breakLinesGroups.length > 0 ? breakLinesGroups : breakLines,
         `Surface #${surfaceNo} BreakLines`,
         xmlText,
@@ -386,13 +386,25 @@ function validateSurfaceGuidelineRules(xmlDoc, xmlText, errors, warnings) {
       warnings.push(createIssue(`Surface #${surfaceNo}: IM_coding-Feature puuttuu`, surface, xmlText));
     } else {
       const labels = extractPropertyLabels(surfaceCodingFeature);
+      const surfaceCodingValue = findPropertyValue(surfaceCodingFeature, "surfaceCoding");
+      const surfaceCodingDescValue = findPropertyValue(surfaceCodingFeature, "surfaceCodingDesc");
 
       if (!labels.includes("surfaceCoding")) {
         warnings.push(createIssue(`Surface #${surfaceNo}: surfaceCoding puuttuu IM_coding-Featureltä`, surfaceCodingFeature, xmlText));
+      } else if (!isSixDigitCode(surfaceCodingValue)) {
+        warnings.push(
+          createIssue(
+            `Surface #${surfaceNo}: surfaceCoding ei ole kuusinumeroinen arvo (arvo: ${formatPropertyValue(surfaceCodingValue)})`,
+            surfaceCodingFeature,
+            xmlText
+          )
+        );
       }
 
       if (!labels.includes("surfaceCodingDesc")) {
         warnings.push(createIssue(`Surface #${surfaceNo}: surfaceCodingDesc puuttuu IM_coding-Featureltä`, surfaceCodingFeature, xmlText));
+      } else if (!surfaceCodingDescValue) {
+        warnings.push(createIssue(`Surface #${surfaceNo}: surfaceCodingDesc on tyhjä`, surfaceCodingFeature, xmlText));
       }
     }
 
@@ -434,10 +446,98 @@ function validateSurfaceSourceDataCoding(nodes, labelPrefix, xmlText, warnings) 
   });
 }
 
+function validateSurfaceBreakLineCoding(nodes, labelPrefix, xmlText, warnings) {
+  nodes.forEach((node, index) => {
+    const itemNo = index + 1;
+
+    if (getLocalName(node) === "BreakLines") {
+      const breakLines = findChildElementsDeep(node, "BreakLine");
+      breakLines.forEach((breakLine, breakLineIndex) => {
+        validateSingleBreakLineCoding(
+          breakLine,
+          `${labelPrefix} #${itemNo} / BreakLine #${breakLineIndex + 1}`,
+          xmlText,
+          warnings
+        );
+      });
+      return;
+    }
+
+    validateSingleBreakLineCoding(node, `${labelPrefix} #${itemNo}`, xmlText, warnings);
+  });
+}
+
+function validateSingleBreakLineCoding(breakLineNode, labelPrefix, xmlText, warnings) {
+  const codingFeature = findFirstFeatureByCode(breakLineNode, "IM_coding");
+
+  if (!codingFeature) {
+    warnings.push(createIssue(`${labelPrefix}: IM_coding-Feature puuttuu`, breakLineNode, xmlText));
+    return;
+  }
+
+  const labels = extractPropertyLabels(codingFeature);
+  const infraCodingValue = findPropertyValue(codingFeature, "infraCoding");
+  const terrainCodingValue = findPropertyValue(codingFeature, "terrainCoding");
+  const terrainCodingDescValue = findPropertyValue(codingFeature, "terrainCodingDesc");
+
+  if (!labels.includes("infraCoding")) {
+    warnings.push(createIssue(`${labelPrefix}: infraCoding puuttuu IM_coding-Featureltä`, codingFeature, xmlText));
+  } else if (!isThreeDigitCode(infraCodingValue)) {
+    warnings.push(
+      createIssue(
+        `${labelPrefix}: infraCoding ei ole kolminumeroinen arvo (arvo: ${formatPropertyValue(infraCodingValue)})`,
+        codingFeature,
+        xmlText
+      )
+    );
+  }
+
+  if (!labels.includes("terrainCoding")) {
+    warnings.push(createIssue(`${labelPrefix}: terrainCoding puuttuu IM_coding-Featureltä`, codingFeature, xmlText));
+  } else if (!terrainCodingValue) {
+    warnings.push(createIssue(`${labelPrefix}: terrainCoding on tyhjä`, codingFeature, xmlText));
+  }
+
+  if (!labels.includes("terrainCodingDesc")) {
+    warnings.push(createIssue(`${labelPrefix}: terrainCodingDesc puuttuu IM_coding-Featureltä`, codingFeature, xmlText));
+  } else if (!terrainCodingDescValue) {
+    warnings.push(createIssue(`${labelPrefix}: terrainCodingDesc on tyhjä`, codingFeature, xmlText));
+  }
+}
+
 function extractPropertyLabels(featureNode) {
   return findChildElementsDeep(featureNode, "Property")
     .map((property) => property.getAttribute("label") || "")
     .filter(Boolean);
+}
+
+function findPropertyValue(featureNode, label) {
+  const property = findChildElementsDeep(featureNode, "Property").find(
+    (node) => (node.getAttribute("label") || "") === label
+  );
+
+  if (!property) {
+    return "";
+  }
+
+  return (
+    property.getAttribute("value") ||
+    property.getAttribute("val") ||
+    normalizeWhitespace(property.textContent) ||
+    ""
+  ).trim();
+}
+
+function formatPropertyValue(value) {
+  return value && value.length ? value : "puuttuu";
+}
+
+function isThreeDigitCode(value) {
+  return /^\d{3}$/.test(String(value || "").trim());
+}
+
+function isSixDigitCode(value) {
+  return /^\d{6}$/.test(String(value || "").trim());
 }
 
 function validateDocumentAgainstXsdHints(xmlDoc, xmlText, schemaModel, errors, warnings) {
@@ -879,6 +979,7 @@ function estimateLineNumber(xmlText, element, options = {}) {
   const candidates = [];
 
   if (options.childName) {
+    candidates.push(`<${options.childName}`);
     candidates.push(`<${tagName}`);
   }
 
