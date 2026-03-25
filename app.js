@@ -1,4 +1,15 @@
-import * as xmllint from "./vendor/xmllint/index-browser.mjs";
+import initXmllint from "./vendor/xmllint/index-browser.mjs";
+
+// 🔥 pakotetaan käyttämään paikallista workeria
+const xmllint = await initXmllint({
+  locateFile: (file) => {
+    if (file.endsWith(".wasm")) {
+      return "./vendor/xmllint/" + file;
+    }
+    return file;
+  },
+  workerURL: "./vendor/xmllint/xmllint-browser.mjs"
+});
 
 const SCHEMA_SOURCES = [
   {
