@@ -381,13 +381,13 @@ function validateSurfaceGuidelineRules(xmlDoc, xmlText, errors, warnings) {
       );
     }
 
-    const surfaceCodingFeature = findDirectFeatureByCode(surface, "IM_coding");
+    const surfaceCodingFeature = findCodingFeature(surface, "IM_coding");
     if (!surfaceCodingFeature) {
       warnings.push(createIssue(`Surface #${surfaceNo}: IM_coding-Feature puuttuu`, surface, xmlText));
     } else {
-      const keys = extractDirectPropertyKeys(surfaceCodingFeature);
-      const surfaceCodingValue = findDirectPropertyValue(surfaceCodingFeature, "surfaceCoding");
-      const surfaceCodingDescValue = findDirectPropertyValue(surfaceCodingFeature, "surfaceCodingDesc");
+      const keys = extractPropertyKeys(surfaceCodingFeature);
+      const surfaceCodingValue = findPropertyValue(surfaceCodingFeature, "surfaceCoding");
+      const surfaceCodingDescValue = findPropertyValue(surfaceCodingFeature, "surfaceCodingDesc");
 
       if (!keys.includes("surfaceCoding")) {
         warnings.push(createIssue(`Surface #${surfaceNo}: surfaceCoding puuttuu IM_coding-Featureltä`, surfaceCodingFeature, xmlText));
@@ -423,14 +423,14 @@ function validateSurfaceGuidelineRules(xmlDoc, xmlText, errors, warnings) {
 function validateSurfaceSourceDataCoding(nodes, labelPrefix, xmlText, warnings) {
   nodes.forEach((node, index) => {
     const itemNo = index + 1;
-    const codingFeature = findDirectFeatureByCode(node, "IM_coding");
+    const codingFeature = findCodingFeature(node, "IM_coding");
 
     if (!codingFeature) {
       warnings.push(createIssue(`${labelPrefix} #${itemNo}: IM_coding-Feature puuttuu`, node, xmlText));
       return;
     }
 
-    const keys = extractDirectPropertyKeys(codingFeature);
+    const keys = extractPropertyKeys(codingFeature);
 
     if (!keys.includes("terrainCoding")) {
       warnings.push(createIssue(`${labelPrefix} #${itemNo}: terrainCoding puuttuu IM_coding-Featureltä`, codingFeature, xmlText));
@@ -468,17 +468,17 @@ function validateSurfaceBreakLineCoding(nodes, labelPrefix, xmlText, warnings) {
 }
 
 function validateSingleBreakLineCoding(breakLineNode, labelPrefix, xmlText, warnings) {
-  const codingFeature = findDirectFeatureByCode(breakLineNode, "IM_coding");
+  const codingFeature = findCodingFeature(breakLineNode, "IM_coding");
 
   if (!codingFeature) {
     warnings.push(createIssue(`${labelPrefix}: IM_coding-Feature puuttuu`, breakLineNode, xmlText));
     return;
   }
 
-  const keys = extractDirectPropertyKeys(codingFeature);
-  const infraCodingValue = findDirectPropertyValue(codingFeature, "infraCoding");
-  const terrainCodingValue = findDirectPropertyValue(codingFeature, "terrainCoding");
-  const terrainCodingDescValue = findDirectPropertyValue(codingFeature, "terrainCodingDesc");
+  const keys = extractPropertyKeys(codingFeature);
+  const infraCodingValue = findPropertyValue(codingFeature, "infraCoding");
+  const terrainCodingValue = findPropertyValue(codingFeature, "terrainCoding");
+  const terrainCodingDescValue = findPropertyValue(codingFeature, "terrainCodingDesc");
 
   if (!keys.includes("infraCoding")) {
     warnings.push(createIssue(`${labelPrefix}: infraCoding puuttuu IM_coding-Featureltä`, codingFeature, xmlText));
@@ -505,14 +505,35 @@ function validateSingleBreakLineCoding(breakLineNode, labelPrefix, xmlText, warn
   }
 }
 
-function extractDirectPropertyKeys(featureNode) {
-  return findDirectChildren(featureNode, "Property")
+function findCodingFeature(node, code) {
+  const directFeature = findDirectChildren(node, "Feature").find(
+    (feature) => (feature.getAttribute("code") || "") === code
+  );
+  if (directFeature) {
+    return directFeature;
+  }
+
+  const featuresContainer = findDirectChildren(node, "Features")[0] || null;
+  if (featuresContainer) {
+    const nestedFeature = findDirectChildren(featuresContainer, "Feature").find(
+      (feature) => (feature.getAttribute("code") || "") === code
+    );
+    if (nestedFeature) {
+      return nestedFeature;
+    }
+  }
+
+  return null;
+}
+
+function extractPropertyKeys(featureNode) {
+  return getFeatureProperties(featureNode)
     .map((property) => getPropertyKey(property))
     .filter(Boolean);
 }
 
-function findDirectPropertyValue(featureNode, key) {
-  const property = findDirectChildren(featureNode, "Property").find(
+function findPropertyValue(featureNode, key) {
+  const property = getFeatureProperties(featureNode).find(
     (node) => getPropertyKey(node) === key
   );
 
@@ -521,6 +542,23 @@ function findDirectPropertyValue(featureNode, key) {
   }
 
   return getPropertyValue(property);
+}
+
+function getFeatureProperties(featureNode) {
+  const directProperties = findDirectChildren(featureNode, "Property");
+  if (directProperties.length > 0) {
+    return directProperties;
+  }
+
+  const propertiesContainers = findDirectChildren(featureNode, "Properties");
+  for (const container of propertiesContainers) {
+    const nested = findDirectChildren(container, "Property");
+    if (nested.length > 0) {
+      return nested;
+    }
+  }
+
+  return [];
 }
 
 function getPropertyKey(propertyNode) {
@@ -989,7 +1027,7 @@ function estimateLineNumber(xmlText, element, path, options = {}) {
   }
 
   const tagName = getLocalName(element);
-  const targetOccurrence = getPathOccurrenceIndex(path);
+  const occurrenceForTag = countOccurrencesForTagAlongPath(path, tagName);
   const tagRegex = new RegExp(`<${escapeRegExp(tagName)}(?=[\\s>/])`, "g");
 
   let match;
@@ -997,7 +1035,7 @@ function estimateLineNumber(xmlText, element, path, options = {}) {
 
   while ((match = tagRegex.exec(xmlText)) !== null) {
     occurrence += 1;
-    if (occurrence === targetOccurrence) {
+    if (occurrence === occurrenceForTag) {
       return xmlText.slice(0, match.index).split(/\r\n|\r|\n/).length;
     }
   }
@@ -1021,12 +1059,23 @@ function estimateLineNumber(xmlText, element, path, options = {}) {
   return null;
 }
 
-function getPathOccurrenceIndex(path) {
-  const match = path.match(/\[(\d+)\]$/);
-  if (!match) {
-    return 1;
+function countOccurrencesForTagAlongPath(path, tagName) {
+  const parts = path.split("/").filter(Boolean);
+  let count = 0;
+
+  for (const part of parts) {
+    const match = part.match(/^([^\[]+)\[(\d+)\]$/);
+    if (!match) {
+      continue;
+    }
+    const name = match[1];
+    const index = Number(match[2]) || 1;
+    if (name === tagName) {
+      count += index;
+    }
   }
-  return Number(match[1]) || 1;
+
+  return Math.max(count, 1);
 }
 
 function buildSnippet(element, options = {}) {
@@ -1068,16 +1117,6 @@ function formatIssue(issue) {
   }
 
   return `${prefix}${issue.message}`;
-}
-
-function findDirectFeatureByCode(parent, code) {
-  return findDirectChildren(parent, "Feature").find(
-    (feature) => (feature.getAttribute("code") || "") === code
-  ) || null;
-}
-
-function findDirectChildren(parent, localName) {
-  return Array.from(parent.children).filter((child) => getLocalName(child) === localName);
 }
 
 function isValidXmlName(value) {
@@ -1123,6 +1162,10 @@ function unique(values) {
 
 function findDirectChild(parent, localName) {
   return Array.from(parent.children).find((child) => getLocalName(child) === localName) || null;
+}
+
+function findDirectChildren(parent, localName) {
+  return Array.from(parent.children).filter((child) => getLocalName(child) === localName);
 }
 
 function hasElement(parent, localName) {
