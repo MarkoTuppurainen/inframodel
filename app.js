@@ -75,11 +75,26 @@ function validateGeneralStructure(xmlDoc, errors, warnings, infos) {
   const project = findFirstElement(xmlDoc, "Project");
   if (!project) {
     warnings.push("Project-elementtiä ei löytynyt");
-  } else {
-    const projectName = project.getAttribute("name");
-    if (!projectName) {
-      warnings.push("Project-elementiltä puuttuu name-attribuutti");
-    }
+  } else if (!project.getAttribute("name")) {
+    warnings.push("Project-elementiltä puuttuu name-attribuutti");
+  }
+
+  const knownTopLevelNames = [
+    "Project",
+    "Units",
+    "Alignments",
+    "Surfaces",
+    "PipeNetworks",
+    "CgPoints",
+    "Parcels",
+    "FeatureDictionary"
+  ];
+
+  const topLevelChildren = Array.from(root.children).map(getLocalName);
+  const matchedKnown = topLevelChildren.filter((name) => knownTopLevelNames.includes(name));
+
+  if (matchedKnown.length === 0) {
+    warnings.push("Juurielementin alta ei löytynyt tunnistettuja LandXML/InfraModel-rakenteita");
   }
 }
 
@@ -138,7 +153,12 @@ function validateByDetectedType(xmlDoc, typeKey, errors, warnings) {
 }
 
 function validateAlignmentContent(xmlDoc, errors, warnings) {
+  const alignmentsContainer = findFirstElement(xmlDoc, "Alignments");
   const alignmentList = findElements(xmlDoc, "Alignment");
+
+  if (!alignmentsContainer && alignmentList.length > 0) {
+    warnings.push("Alignment-elementtejä löytyi, mutta niitä kokoavaa Alignments-elementtiä ei löytynyt");
+  }
 
   if (alignmentList.length === 0) {
     errors.push("Tiedosto näyttää linjausaineistolta, mutta Alignment-elementtejä ei löytynyt");
@@ -158,34 +178,63 @@ function validateAlignmentContent(xmlDoc, errors, warnings) {
 
     const coordGeom = findFirstChildElement(alignment, "CoordGeom");
     if (!coordGeom) {
-      errors.push(`Alignment #${number}: CoordGeom-elementti puuttuu`);
+      errors.push(`Alignment #${number}: pakollinen CoordGeom-elementti puuttuu`);
       return;
     }
 
     const lines = findChildElementsDeep(coordGeom, "Line");
     const curves = findChildElementsDeep(coordGeom, "Curve");
     const spirals = findChildElementsDeep(coordGeom, "Spiral");
+    const totalGeom = lines.length + curves.length + spirals.length;
 
-    if (lines.length + curves.length + spirals.length === 0) {
-      errors.push(`Alignment #${number}: geometria puuttuu (Line/Curve/Spiral)`);
+    if (totalGeom === 0) {
+      errors.push(`Alignment #${number}: CoordGeom ei sisällä geometriaelementtejä (Line/Curve/Spiral)`);
     }
 
     lines.forEach((line, lineIndex) => {
+      validateStartEndPoints(
+        line,
+        `Alignment #${number}, Line #${lineIndex + 1}`,
+        errors,
+        warnings
+      );
+
       if (!line.getAttribute("length")) {
         warnings.push(`Alignment #${number}, Line #${lineIndex + 1}: length-attribuutti puuttuu`);
       }
     });
 
     curves.forEach((curve, curveIndex) => {
+      validateStartEndPoints(
+        curve,
+        `Alignment #${number}, Curve #${curveIndex + 1}`,
+        errors,
+        warnings
+      );
+
       if (!curve.getAttribute("radius")) {
         warnings.push(`Alignment #${number}, Curve #${curveIndex + 1}: radius-attribuutti puuttuu`);
       }
+    });
+
+    spirals.forEach((spiral, spiralIndex) => {
+      validateStartEndPoints(
+        spiral,
+        `Alignment #${number}, Spiral #${spiralIndex + 1}`,
+        errors,
+        warnings
+      );
     });
   });
 }
 
 function validateSurfaceContent(xmlDoc, errors, warnings) {
+  const surfacesContainer = findFirstElement(xmlDoc, "Surfaces");
   const surfaces = findElements(xmlDoc, "Surface");
+
+  if (!surfacesContainer && surfaces.length > 0) {
+    warnings.push("Surface-elementtejä löytyi, mutta niitä kokoavaa Surfaces-elementtiä ei löytynyt");
+  }
 
   if (surfaces.length === 0) {
     errors.push("Tiedosto näyttää pintamallilta, mutta Surface-elementtejä ei löytynyt");
@@ -201,32 +250,55 @@ function validateSurfaceContent(xmlDoc, errors, warnings) {
 
     const definition = findFirstChildElement(surface, "Definition");
     if (!definition) {
-      warnings.push(`Surface #${number}: Definition-elementtiä ei löytynyt`);
+      errors.push(`Surface #${number}: pakollinen Definition-elementti puuttuu`);
+      return;
     }
 
-    const pnts =
-      findChildElementsDeep(surface, "Pnts").length +
-      findChildElementsDeep(surface, "P").length;
+    const pntsNode = findFirstChildElement(definition, "Pnts");
+    const facesNode = findFirstChildElement(definition, "Faces");
 
-    const faces =
-      findChildElementsDeep(surface, "Faces").length +
-      findChildElementsDeep(surface, "F").length;
+    const pointNodes = pntsNode ? findChildElementsDeep(pntsNode, "P") : [];
+    const faceNodes = facesNode ? findChildElementsDeep(facesNode, "F") : [];
 
-    if (pnts === 0) {
-      warnings.push(`Surface #${number}: pisteaineistoa ei löytynyt (Pnts/P)`);
+    if (!pntsNode) {
+      errors.push(`Surface #${number}: Definition-elementin alta puuttuu Pnts`);
+    } else if (pointNodes.length === 0) {
+      errors.push(`Surface #${number}: Pnts-elementti ei sisällä yhtään P-pistettä`);
     }
 
-    if (faces === 0) {
-      warnings.push(`Surface #${number}: pintakolmioita ei löytynyt (Faces/F)`);
+    if (!facesNode) {
+      errors.push(`Surface #${number}: Definition-elementin alta puuttuu Faces`);
+    } else if (faceNodes.length === 0) {
+      errors.push(`Surface #${number}: Faces-elementti ei sisällä yhtään F-kolmiota`);
     }
+
+    pointNodes.forEach((point, pointIndex) => {
+      const text = normalizeWhitespace(point.textContent);
+      if (!text) {
+        errors.push(`Surface #${number}, P #${pointIndex + 1}: pisteen koordinaattisisältö puuttuu`);
+      }
+    });
+
+    faceNodes.forEach((face, faceIndex) => {
+      const text = normalizeWhitespace(face.textContent);
+      if (!text) {
+        errors.push(`Surface #${number}, F #${faceIndex + 1}: kolmion indeksisisältö puuttuu`);
+      }
+    });
   });
 }
 
 function validatePipeContent(xmlDoc, errors, warnings) {
+  const networksContainer = findFirstElement(xmlDoc, "PipeNetworks");
   const networks = findElements(xmlDoc, "PipeNetwork");
 
+  if (!networksContainer && networks.length > 0) {
+    warnings.push("PipeNetwork-elementtejä löytyi, mutta niitä kokoavaa PipeNetworks-elementtiä ei löytynyt");
+  }
+
   if (networks.length === 0) {
-    warnings.push("Tiedosto näyttää verkostoaineistolta, mutta PipeNetwork-elementtiä ei löytynyt");
+    errors.push("Tiedosto näyttää verkostoaineistolta, mutta PipeNetwork-elementtejä ei löytynyt");
+    return;
   }
 
   networks.forEach((network, index) => {
@@ -235,23 +307,51 @@ function validatePipeContent(xmlDoc, errors, warnings) {
     if (!network.getAttribute("name")) {
       warnings.push(`PipeNetwork #${number}: name-attribuutti puuttuu`);
     }
+
+    const pipes = findChildElementsDeep(network, "Pipe");
+    const structures = findChildElementsDeep(network, "Struct");
+    const fittings = findChildElementsDeep(network, "Fitting");
+    const appurtenances = findChildElementsDeep(network, "Appurtenance");
+
+    const totalNetworkObjects =
+      pipes.length + structures.length + fittings.length + appurtenances.length;
+
+    if (totalNetworkObjects === 0) {
+      errors.push(`PipeNetwork #${number}: verkoston sisältö puuttuu (Pipe/Struct/Fitting/Appurtenance)`);
+    }
+
+    pipes.forEach((pipe, pipeIndex) => {
+      if (!pipe.getAttribute("name")) {
+        warnings.push(`PipeNetwork #${number}, Pipe #${pipeIndex + 1}: name-attribuutti puuttuu`);
+      }
+    });
   });
 }
 
 function validatePointContent(xmlDoc, errors, warnings) {
+  const cgPointsContainer = findFirstElement(xmlDoc, "CgPoints");
   const cgPoints = findElements(xmlDoc, "CgPoint");
 
+  if (!cgPointsContainer && cgPoints.length > 0) {
+    warnings.push("CgPoint-elementtejä löytyi, mutta niitä kokoavaa CgPoints-elementtiä ei löytynyt");
+  }
+
   if (cgPoints.length === 0) {
-    warnings.push("Tiedosto näyttää pisteaineistolta, mutta CgPoint-elementtejä ei löytynyt");
+    errors.push("Tiedosto näyttää pisteaineistolta, mutta CgPoint-elementtejä ei löytynyt");
     return;
   }
 
   cgPoints.forEach((point, index) => {
     const number = index + 1;
-    const text = (point.textContent || "").trim();
+    const text = normalizeWhitespace(point.textContent);
 
     if (!text) {
-      warnings.push(`CgPoint #${number}: koordinaattisisältö puuttuu`);
+      errors.push(`CgPoint #${number}: pakollinen koordinaattisisältö puuttuu`);
+    }
+
+    const parts = text.split(/\s+/).filter(Boolean);
+    if (parts.length < 2) {
+      errors.push(`CgPoint #${number}: koordinaatteja on liian vähän`);
     }
   });
 }
@@ -279,6 +379,27 @@ function validateGenericLandXMLContent(xmlDoc, errors, warnings) {
 
   if (matchedKnown.length === 0) {
     warnings.push("Juurielementin alta ei löytynyt tunnistettuja LandXML/InfraModel-rakenteita");
+  }
+}
+
+function validateStartEndPoints(element, label, errors, warnings) {
+  const start = findFirstChildElement(element, "Start");
+  const end = findFirstChildElement(element, "End");
+
+  if (!start) {
+    errors.push(`${label}: Start-elementti puuttuu`);
+  } else if (!normalizeWhitespace(start.textContent)) {
+    errors.push(`${label}: Start-elementin koordinaattisisältö puuttuu`);
+  }
+
+  if (!end) {
+    errors.push(`${label}: End-elementti puuttuu`);
+  } else if (!normalizeWhitespace(end.textContent)) {
+    errors.push(`${label}: End-elementin koordinaattisisältö puuttuu`);
+  }
+
+  if (!element.getAttribute("staStart")) {
+    warnings.push(`${label}: staStart-attribuutti puuttuu`);
   }
 }
 
@@ -342,6 +463,10 @@ function findChildElementsDeep(parent, localName) {
 
 function getLocalName(element) {
   return element.localName || element.nodeName;
+}
+
+function normalizeWhitespace(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
 }
 
 function escapeHtml(value) {
