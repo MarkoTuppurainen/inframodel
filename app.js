@@ -1,4 +1,4 @@
-import * as xmllint from "https://cdn.jsdelivr.net/npm/xmllint-wasm@5.1.0/index-browser.mjs";
+import * as xmllint from "./vendor/xmllint/index-browser.mjs";
 
 const SCHEMA_SOURCES = [
   {
