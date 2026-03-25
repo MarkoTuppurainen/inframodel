@@ -381,13 +381,13 @@ function validateSurfaceGuidelineRules(xmlDoc, xmlText, errors, warnings) {
       );
     }
 
-    const surfaceCodingFeature = findFirstFeatureByCode(surface, "IM_coding");
+    const surfaceCodingFeature = findDirectFeatureByCode(surface, "IM_coding");
     if (!surfaceCodingFeature) {
       warnings.push(createIssue(`Surface #${surfaceNo}: IM_coding-Feature puuttuu`, surface, xmlText));
     } else {
-      const labels = extractPropertyLabels(surfaceCodingFeature);
-      const surfaceCodingValue = findPropertyValue(surfaceCodingFeature, "surfaceCoding");
-      const surfaceCodingDescValue = findPropertyValue(surfaceCodingFeature, "surfaceCodingDesc");
+      const labels = extractDirectPropertyKeys(surfaceCodingFeature);
+      const surfaceCodingValue = findDirectPropertyValue(surfaceCodingFeature, "surfaceCoding");
+      const surfaceCodingDescValue = findDirectPropertyValue(surfaceCodingFeature, "surfaceCodingDesc");
 
       if (!labels.includes("surfaceCoding")) {
         warnings.push(createIssue(`Surface #${surfaceNo}: surfaceCoding puuttuu IM_coding-Featureltä`, surfaceCodingFeature, xmlText));
@@ -423,14 +423,14 @@ function validateSurfaceGuidelineRules(xmlDoc, xmlText, errors, warnings) {
 function validateSurfaceSourceDataCoding(nodes, labelPrefix, xmlText, warnings) {
   nodes.forEach((node, index) => {
     const itemNo = index + 1;
-    const codingFeature = findFirstFeatureByCode(node, "IM_coding");
+    const codingFeature = findDirectFeatureByCode(node, "IM_coding");
 
     if (!codingFeature) {
       warnings.push(createIssue(`${labelPrefix} #${itemNo}: IM_coding-Feature puuttuu`, node, xmlText));
       return;
     }
 
-    const labels = extractPropertyLabels(codingFeature);
+    const labels = extractDirectPropertyKeys(codingFeature);
 
     if (!labels.includes("terrainCoding")) {
       warnings.push(createIssue(`${labelPrefix} #${itemNo}: terrainCoding puuttuu IM_coding-Featureltä`, codingFeature, xmlText));
@@ -468,17 +468,17 @@ function validateSurfaceBreakLineCoding(nodes, labelPrefix, xmlText, warnings) {
 }
 
 function validateSingleBreakLineCoding(breakLineNode, labelPrefix, xmlText, warnings) {
-  const codingFeature = findFirstFeatureByCode(breakLineNode, "IM_coding");
+  const codingFeature = findDirectFeatureByCode(breakLineNode, "IM_coding");
 
   if (!codingFeature) {
     warnings.push(createIssue(`${labelPrefix}: IM_coding-Feature puuttuu`, breakLineNode, xmlText));
     return;
   }
 
-  const labels = extractPropertyLabels(codingFeature);
-  const infraCodingValue = findPropertyValue(codingFeature, "infraCoding");
-  const terrainCodingValue = findPropertyValue(codingFeature, "terrainCoding");
-  const terrainCodingDescValue = findPropertyValue(codingFeature, "terrainCodingDesc");
+  const labels = extractDirectPropertyKeys(codingFeature);
+  const infraCodingValue = findDirectPropertyValue(codingFeature, "infraCoding");
+  const terrainCodingValue = findDirectPropertyValue(codingFeature, "terrainCoding");
+  const terrainCodingDescValue = findDirectPropertyValue(codingFeature, "terrainCodingDesc");
 
   if (!labels.includes("infraCoding")) {
     warnings.push(createIssue(`${labelPrefix}: infraCoding puuttuu IM_coding-Featureltä`, codingFeature, xmlText));
@@ -505,25 +505,38 @@ function validateSingleBreakLineCoding(breakLineNode, labelPrefix, xmlText, warn
   }
 }
 
-function extractPropertyLabels(featureNode) {
-  return findChildElementsDeep(featureNode, "Property")
-    .map((property) => property.getAttribute("label") || "")
+function extractDirectPropertyKeys(featureNode) {
+  return findDirectChildren(featureNode, "Property")
+    .map((property) => getPropertyKey(property))
     .filter(Boolean);
 }
 
-function findPropertyValue(featureNode, label) {
-  const property = findChildElementsDeep(featureNode, "Property").find(
-    (node) => (node.getAttribute("label") || "") === label
+function findDirectPropertyValue(featureNode, key) {
+  const property = findDirectChildren(featureNode, "Property").find(
+    (node) => getPropertyKey(node) === key
   );
 
   if (!property) {
     return "";
   }
 
+  return getPropertyValue(property);
+}
+
+function getPropertyKey(propertyNode) {
   return (
-    property.getAttribute("value") ||
-    property.getAttribute("val") ||
-    normalizeWhitespace(property.textContent) ||
+    propertyNode.getAttribute("label") ||
+    propertyNode.getAttribute("name") ||
+    propertyNode.getAttribute("code") ||
+    ""
+  ).trim();
+}
+
+function getPropertyValue(propertyNode) {
+  return (
+    propertyNode.getAttribute("value") ||
+    propertyNode.getAttribute("val") ||
+    normalizeWhitespace(propertyNode.textContent) ||
     ""
   ).trim();
 }
@@ -1041,10 +1054,14 @@ function formatIssue(issue) {
   return `${prefix}${issue.message}`;
 }
 
-function findFirstFeatureByCode(parent, code) {
-  return findChildElementsDeep(parent, "Feature").find(
+function findDirectFeatureByCode(parent, code) {
+  return findDirectChildren(parent, "Feature").find(
     (feature) => (feature.getAttribute("code") || "") === code
   ) || null;
+}
+
+function findDirectChildren(parent, localName) {
+  return Array.from(parent.children).filter((child) => getLocalName(child) === localName);
 }
 
 function isValidXmlName(value) {
