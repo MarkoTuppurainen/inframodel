@@ -385,11 +385,11 @@ function validateSurfaceGuidelineRules(xmlDoc, xmlText, errors, warnings) {
     if (!surfaceCodingFeature) {
       warnings.push(createIssue(`Surface #${surfaceNo}: IM_coding-Feature puuttuu`, surface, xmlText));
     } else {
-      const labels = extractDirectPropertyKeys(surfaceCodingFeature);
+      const keys = extractDirectPropertyKeys(surfaceCodingFeature);
       const surfaceCodingValue = findDirectPropertyValue(surfaceCodingFeature, "surfaceCoding");
       const surfaceCodingDescValue = findDirectPropertyValue(surfaceCodingFeature, "surfaceCodingDesc");
 
-      if (!labels.includes("surfaceCoding")) {
+      if (!keys.includes("surfaceCoding")) {
         warnings.push(createIssue(`Surface #${surfaceNo}: surfaceCoding puuttuu IM_coding-Featureltä`, surfaceCodingFeature, xmlText));
       } else if (!isSixDigitCode(surfaceCodingValue)) {
         warnings.push(
@@ -401,7 +401,7 @@ function validateSurfaceGuidelineRules(xmlDoc, xmlText, errors, warnings) {
         );
       }
 
-      if (!labels.includes("surfaceCodingDesc")) {
+      if (!keys.includes("surfaceCodingDesc")) {
         warnings.push(createIssue(`Surface #${surfaceNo}: surfaceCodingDesc puuttuu IM_coding-Featureltä`, surfaceCodingFeature, xmlText));
       } else if (!surfaceCodingDescValue) {
         warnings.push(createIssue(`Surface #${surfaceNo}: surfaceCodingDesc on tyhjä`, surfaceCodingFeature, xmlText));
@@ -430,17 +430,17 @@ function validateSurfaceSourceDataCoding(nodes, labelPrefix, xmlText, warnings) 
       return;
     }
 
-    const labels = extractDirectPropertyKeys(codingFeature);
+    const keys = extractDirectPropertyKeys(codingFeature);
 
-    if (!labels.includes("terrainCoding")) {
+    if (!keys.includes("terrainCoding")) {
       warnings.push(createIssue(`${labelPrefix} #${itemNo}: terrainCoding puuttuu IM_coding-Featureltä`, codingFeature, xmlText));
     }
 
-    if (!labels.includes("terrainCodingDesc")) {
+    if (!keys.includes("terrainCodingDesc")) {
       warnings.push(createIssue(`${labelPrefix} #${itemNo}: terrainCodingDesc puuttuu IM_coding-Featureltä`, codingFeature, xmlText));
     }
 
-    if (!labels.includes("surfaceCoding")) {
+    if (!keys.includes("surfaceCoding")) {
       warnings.push(createIssue(`${labelPrefix} #${itemNo}: surfaceCoding puuttuu (valinnainen, ilmoitetaan huomautuksena)`, codingFeature, xmlText));
     }
   });
@@ -451,7 +451,7 @@ function validateSurfaceBreakLineCoding(nodes, labelPrefix, xmlText, warnings) {
     const itemNo = index + 1;
 
     if (getLocalName(node) === "BreakLines") {
-      const breakLines = findChildElementsDeep(node, "BreakLine");
+      const breakLines = findDirectChildren(node, "BreakLine");
       breakLines.forEach((breakLine, breakLineIndex) => {
         validateSingleBreakLineCoding(
           breakLine,
@@ -475,12 +475,12 @@ function validateSingleBreakLineCoding(breakLineNode, labelPrefix, xmlText, warn
     return;
   }
 
-  const labels = extractDirectPropertyKeys(codingFeature);
+  const keys = extractDirectPropertyKeys(codingFeature);
   const infraCodingValue = findDirectPropertyValue(codingFeature, "infraCoding");
   const terrainCodingValue = findDirectPropertyValue(codingFeature, "terrainCoding");
   const terrainCodingDescValue = findDirectPropertyValue(codingFeature, "terrainCodingDesc");
 
-  if (!labels.includes("infraCoding")) {
+  if (!keys.includes("infraCoding")) {
     warnings.push(createIssue(`${labelPrefix}: infraCoding puuttuu IM_coding-Featureltä`, codingFeature, xmlText));
   } else if (!isThreeDigitCode(infraCodingValue)) {
     warnings.push(
@@ -492,13 +492,13 @@ function validateSingleBreakLineCoding(breakLineNode, labelPrefix, xmlText, warn
     );
   }
 
-  if (!labels.includes("terrainCoding")) {
+  if (!keys.includes("terrainCoding")) {
     warnings.push(createIssue(`${labelPrefix}: terrainCoding puuttuu IM_coding-Featureltä`, codingFeature, xmlText));
   } else if (!terrainCodingValue) {
     warnings.push(createIssue(`${labelPrefix}: terrainCoding on tyhjä`, codingFeature, xmlText));
   }
 
-  if (!labels.includes("terrainCodingDesc")) {
+  if (!keys.includes("terrainCodingDesc")) {
     warnings.push(createIssue(`${labelPrefix}: terrainCodingDesc puuttuu IM_coding-Featureltä`, codingFeature, xmlText));
   } else if (!terrainCodingDescValue) {
     warnings.push(createIssue(`${labelPrefix}: terrainCodingDesc on tyhjä`, codingFeature, xmlText));
@@ -960,7 +960,7 @@ function buildLocationInfo(element, xmlText, options = {}) {
   }
 
   const path = buildElementPath(element);
-  const line = estimateLineNumber(xmlText, element, options);
+  const line = estimateLineNumber(xmlText, element, path, options);
   const snippet = buildSnippet(element, options);
 
   return { line, path, snippet };
@@ -983,27 +983,35 @@ function buildElementPath(element) {
   return "/" + parts.join("/");
 }
 
-function estimateLineNumber(xmlText, element, options = {}) {
+function estimateLineNumber(xmlText, element, path, options = {}) {
   if (!xmlText || !element) {
     return null;
   }
 
   const tagName = getLocalName(element);
-  const candidates = [];
+  const targetOccurrence = getPathOccurrenceIndex(path);
+  const tagRegex = new RegExp(`<${escapeRegExp(tagName)}(?=[\\s>/])`, "g");
 
+  let match;
+  let occurrence = 0;
+
+  while ((match = tagRegex.exec(xmlText)) !== null) {
+    occurrence += 1;
+    if (occurrence === targetOccurrence) {
+      return xmlText.slice(0, match.index).split(/\r\n|\r|\n/).length;
+    }
+  }
+
+  const fallbacks = [];
   if (options.childName) {
-    candidates.push(`<${options.childName}`);
-    candidates.push(`<${tagName}`);
+    fallbacks.push(`<${options.childName}`);
   }
-
   if (options.attributeName) {
-    candidates.push(`${options.attributeName}=`);
-    candidates.push(`<${tagName}`);
+    fallbacks.push(`${options.attributeName}=`);
   }
+  fallbacks.push(`<${tagName}`);
 
-  candidates.push(`<${tagName}`);
-
-  for (const candidate of candidates) {
+  for (const candidate of fallbacks) {
     const idx = xmlText.indexOf(candidate);
     if (idx >= 0) {
       return xmlText.slice(0, idx).split(/\r\n|\r|\n/).length;
@@ -1011,6 +1019,14 @@ function estimateLineNumber(xmlText, element, options = {}) {
   }
 
   return null;
+}
+
+function getPathOccurrenceIndex(path) {
+  const match = path.match(/\[(\d+)\]$/);
+  if (!match) {
+    return 1;
+  }
+  return Number(match[1]) || 1;
 }
 
 function buildSnippet(element, options = {}) {
@@ -1146,6 +1162,10 @@ function getLocalName(element) {
 
 function normalizeWhitespace(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function escapeHtml(value) {
