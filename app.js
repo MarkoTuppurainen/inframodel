@@ -1,7 +1,7 @@
-import initXmllint from "./vendor/xmllint/index-browser.mjs";
+import * as xmllintModule from "./vendor/xmllint/index-browser.mjs";
 
-// 🔥 pakotetaan käyttämään paikallista workeria
-const xmllint = await initXmllint({
+// 🔥 alustetaan xmllint oikein
+const xmllint = await xmllintModule.default({
   locateFile: (file) => {
     if (file.endsWith(".wasm")) {
       return "./vendor/xmllint/" + file;
