@@ -100,7 +100,9 @@ async function validateXML() {
   }
 
   validateByDetectedType(xmlDoc, detectedType.key, schemaModel, errors, warnings);
-  validateBreakLineCoding(xmlDoc, warnings);
+
+  // Käyttöohjeisiin perustuvat lisäsäännöt
+  validateApplicationGuidelineRules(xmlDoc, detectedType.key, errors, warnings);
 
   renderResult({
     result,
@@ -154,8 +156,8 @@ function validateGeneralStructure(xmlDoc, versionConfig, errors, warnings, infos
   const root = xmlDoc.documentElement;
   const rootName = getLocalName(root);
 
-  if (rootName !== "LandXML" && rootName !== "InfraModel" && rootName !== "IM") {
-    errors.push(`Root-elementti ei näytä InfraModel/LandXML-tiedostolta (nyt: ${rootName})`);
+  if (rootName !== "LandXML") {
+    errors.push(`Root-elementin tulee olla LandXML (nyt: ${rootName})`);
   }
 
   const version =
@@ -205,6 +207,11 @@ function validateGeneralStructure(xmlDoc, versionConfig, errors, warnings, infos
     warnings.push("xsi:schemaLocation puuttuu");
   } else {
     infos.push("xsi:schemaLocation löytyi");
+  }
+
+  const units = findFirstElement(xmlDoc, "Units");
+  if (!units) {
+    errors.push("Units-elementti puuttuu");
   }
 
   const project = findFirstElement(xmlDoc, "Project");
@@ -286,6 +293,140 @@ function validateByDetectedType(xmlDoc, typeKey, schemaModel, errors, warnings) 
       warnings.push("Tiedoston tarkkaa InfraModel-sisältötyyppiä ei tunnistettu, joten tehtiin vain yleiset tarkistukset");
       break;
   }
+}
+
+function validateApplicationGuidelineRules(xmlDoc, typeKey, errors, warnings) {
+  // Header- ja yksikkösäännöt
+  validateUnitsContent(xmlDoc, warnings);
+
+  // Käyttöohjeiden pintamallisäännöt
+  if (typeKey === "surfaces") {
+    validateSurfaceGuidelineRules(xmlDoc, errors, warnings);
+  }
+}
+
+function validateUnitsContent(xmlDoc, warnings) {
+  const units = findFirstElement(xmlDoc, "Units");
+  if (!units) {
+    return;
+  }
+
+  const metric = findFirstChildElement(units, "Metric");
+  if (!metric) {
+    warnings.push("Units-elementin alta puuttuu Metric");
+    return;
+  }
+
+  const recommendedAttrs = [
+    "areaUnit",
+    "linearUnit",
+    "volumeUnit",
+    "temperatureUnit",
+    "pressureUnit",
+    "diameterUnit",
+    "weightUnit",
+    "velocityUnit",
+    "directionUnit",
+    "angularUnit"
+  ];
+
+  recommendedAttrs.forEach((attrName) => {
+    if (!metric.hasAttribute(attrName)) {
+      warnings.push(`Units/Metric: suositeltu attribuutti puuttuu: ${attrName}`);
+    }
+  });
+}
+
+function validateSurfaceGuidelineRules(xmlDoc, errors, warnings) {
+  const surfaces = findElements(xmlDoc, "Surface");
+
+  surfaces.forEach((surface, surfaceIndex) => {
+    const surfaceNo = surfaceIndex + 1;
+    const definition = findFirstChildElement(surface, "Definition");
+
+    if (!definition) {
+      return;
+    }
+
+    const dataPointsGroups = findChildElementsDeep(surface, "DataPoints");
+    const dataPoints = findChildElementsDeep(surface, "DataPoint");
+    const breakLinesGroups = findChildElementsDeep(surface, "BreakLines");
+    const breakLines = findChildElementsDeep(surface, "BreakLine");
+
+    if (dataPointsGroups.length > 0 || dataPoints.length > 0) {
+      validateSurfaceSourceDataCoding(
+        dataPointsGroups.length > 0 ? dataPointsGroups : dataPoints,
+        `Surface #${surfaceNo} DataPoints`,
+        warnings
+      );
+    }
+
+    if (breakLinesGroups.length > 0 || breakLines.length > 0) {
+      validateSurfaceSourceDataCoding(
+        breakLinesGroups.length > 0 ? breakLinesGroups : breakLines,
+        `Surface #${surfaceNo} BreakLines`,
+        warnings
+      );
+    }
+
+    const surfaceCodingFeature = findFirstFeatureByCode(surface, "IM_coding");
+    if (!surfaceCodingFeature) {
+      warnings.push(`Surface #${surfaceNo}: IM_coding-Feature puuttuu`);
+    } else {
+      const labels = extractPropertyLabels(surfaceCodingFeature);
+
+      if (!labels.includes("surfaceCoding")) {
+        warnings.push(`Surface #${surfaceNo}: surfaceCoding puuttuu IM_coding-Featureltä`);
+      }
+
+      if (!labels.includes("surfaceCodingDesc")) {
+        warnings.push(`Surface #${surfaceNo}: surfaceCodingDesc puuttuu IM_coding-Featureltä`);
+      }
+    }
+
+    const pntsNode = findFirstDeepChildElement(definition, "Pnts");
+    const facesNode = findFirstDeepChildElement(definition, "Faces");
+
+    if (!pntsNode) {
+      errors.push(`Surface #${surfaceNo}: Definition-elementin alta puuttuu Pnts`);
+    }
+    if (!facesNode) {
+      errors.push(`Surface #${surfaceNo}: Definition-elementin alta puuttuu Faces`);
+    }
+  });
+}
+
+function validateSurfaceSourceDataCoding(nodes, labelPrefix, warnings) {
+  nodes.forEach((node, index) => {
+    const itemNo = index + 1;
+    const codingFeature = findFirstFeatureByCode(node, "IM_coding");
+
+    if (!codingFeature) {
+      warnings.push(`${labelPrefix} #${itemNo}: IM_coding-Feature puuttuu`);
+      return;
+    }
+
+    const labels = extractPropertyLabels(codingFeature);
+
+    if (!labels.includes("terrainCoding")) {
+      warnings.push(`${labelPrefix} #${itemNo}: terrainCoding puuttuu IM_coding-Featureltä`);
+    }
+
+    if (!labels.includes("terrainCodingDesc")) {
+      warnings.push(`${labelPrefix} #${itemNo}: terrainCodingDesc puuttuu IM_coding-Featureltä`);
+    }
+
+    // surfaceCoding on ohjeen mukaan source datalle valinnainen
+    if (!labels.includes("surfaceCoding")) {
+      warnings.push(`${labelPrefix} #${itemNo}: surfaceCoding puuttuu (valinnainen, ilmoitetaan huomautuksena)`);
+    }
+  });
+}
+
+function extractPropertyLabels(featureNode) {
+  return findChildElementsDeep(featureNode, "Property")
+    .map((property) => property.getAttribute("label") || "")
+    .filter(Boolean);
 }
 
 function validateDocumentAgainstXsdHints(xmlDoc, schemaModel, errors, warnings) {
@@ -415,42 +556,6 @@ function validateGenericLandXMLContent(xmlDoc, schemaModel, errors, warnings) {
   if (schemaModel) {
     validateElementWithSchemaRule(root, "LandXML", schemaModel, "LandXML", errors, warnings);
   }
-}
-
-function validateBreakLineCoding(xmlDoc, warnings) {
-  const breakLines = findElements(xmlDoc, "BreakLine");
-
-  breakLines.forEach((breakLine, index) => {
-    const number = index + 1;
-    const codingFeature = findFirstFeatureByCode(breakLine, "IM_coding");
-
-    if (!codingFeature) {
-      warnings.push(`BreakLine #${number}: IM_coding-Feature puuttuu`);
-      return;
-    }
-
-    const source = codingFeature.getAttribute("source") || "";
-    if (source && source !== "inframodel") {
-      warnings.push(`BreakLine #${number}: IM_coding-Feature source ei ole 'inframodel' (nyt: ${source})`);
-    }
-
-    const properties = findChildElementsDeep(codingFeature, "Property");
-    const labels = properties
-      .map((property) => property.getAttribute("label") || "")
-      .filter(Boolean);
-
-    if (!labels.includes("terrainCoding")) {
-      warnings.push(`BreakLine #${number}: IM_coding-Featureltä puuttuu terrainCoding`);
-    }
-
-    if (!labels.includes("terrainCodingDesc")) {
-      warnings.push(`BreakLine #${number}: IM_coding-Featureltä puuttuu terrainCodingDesc`);
-    }
-
-    if (!labels.includes("infraCoding")) {
-      warnings.push(`BreakLine #${number}: infraCoding puuttuu (huom: tätä ei käsitellä tässä versiossa yleispakollisena virheenä)`);
-    }
-  });
 }
 
 async function loadSchemaModelForVersion(versionKey) {
@@ -770,6 +875,10 @@ function hasElement(parent, localName) {
 function findFirstElement(parent, localName) {
   const elements = findElements(parent, localName);
   return elements.length > 0 ? elements[0] : null;
+}
+
+function findFirstDeepChildElement(parent, localName) {
+  return findElements(parent, localName)[0] || null;
 }
 
 function findElements(parent, localName) {
