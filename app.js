@@ -5,19 +5,14 @@ const EXPECTED_NAMESPACES = {
   im: "http://buildingsmart.fi/im/404"
 };
 
-const XSD_TEMPLATE_VALUES = {
-  release_directory: "http://buildingsmart.fi/inframodel/404",
-  github_release: "4.2.0"
-};
-
 const XSD_SOURCES = [
   {
-    name: "inframodel-raw.xsd",
-    url: "https://raw.githubusercontent.com/buildingSMART-Finland/InfraModel/4.2.0/schema/inframodel-raw.xsd"
+    name: "inframodel.xsd",
+    url: "https://github.com/buildingSMART-Finland/InfraModel/releases/download/4.2.0/inframodel.xsd"
   },
   {
-    name: "im-raw.xsd",
-    url: "https://raw.githubusercontent.com/buildingSMART-Finland/InfraModel/4.2.0/schema/im-raw.xsd"
+    name: "im.xsd",
+    url: "https://github.com/buildingSMART-Finland/InfraModel/releases/download/4.2.0/im.xsd"
   }
 ];
 
@@ -58,7 +53,7 @@ async function validateXML() {
 
   try {
     schemaModel = await loadSchemaModel();
-    infos.push("XSD-säännöt ladattu");
+    infos.push("Julkaistut XSD-säännöt ladattu");
   } catch (error) {
     warnings.push(`XSD-sääntöjen lataus epäonnistui: ${String(error)}`);
   }
@@ -217,7 +212,6 @@ function validateByDetectedType(xmlDoc, typeKey, schemaModel, errors, warnings) 
     case "generic_landxml":
       validateGenericLandXMLContent(xmlDoc, schemaModel, errors, warnings);
       break;
-    case "unknown":
     default:
       warnings.push("Tiedoston tarkkaa InfraModel-sisältötyyppiä ei tunnistettu, joten tehtiin vain yleiset tarkistukset");
       break;
@@ -647,18 +641,17 @@ async function loadSchemaModel() {
   const docs = await Promise.all(
     XSD_SOURCES.map(async (source) => {
       const response = await fetch(source.url, { cache: "force-cache" });
+
       if (!response.ok) {
         throw new Error(`XSD-tiedoston lataus epäonnistui: ${source.name} (${response.status})`);
       }
 
-      const originalText = await response.text();
-      const text = preprocessXsdText(originalText, source.name);
-
+      const text = await response.text();
       const doc = new DOMParser().parseFromString(text, "application/xml");
       const parseError = doc.querySelector("parsererror");
 
       if (parseError) {
-        throw new Error(`XSD-tiedosto ei ole kelvollinen XML esikäsittelyn jälkeen: ${source.name}`);
+        throw new Error(`XSD-tiedosto ei ole kelvollinen XML: ${source.name}`);
       }
 
       return doc;
@@ -667,21 +660,6 @@ async function loadSchemaModel() {
 
   schemaModelCache = buildSchemaModel(docs);
   return schemaModelCache;
-}
-
-function preprocessXsdText(text, sourceName) {
-  let processed = text;
-
-  processed = processed.replaceAll("{{release_directory}}/im", EXPECTED_NAMESPACES.im);
-  processed = processed.replaceAll("{{release_directory}}", EXPECTED_NAMESPACES.default);
-  processed = processed.replaceAll("{{github_release}}", XSD_TEMPLATE_VALUES.github_release);
-
-  if (sourceName === "im-raw.xsd") {
-    processed = processed.replaceAll(`targetNamespace="${EXPECTED_NAMESPACES.default}/im"`, `targetNamespace="${EXPECTED_NAMESPACES.im}"`);
-    processed = processed.replaceAll(`xmlns:im="${EXPECTED_NAMESPACES.default}/im"`, `xmlns:im="${EXPECTED_NAMESPACES.im}"`);
-  }
-
-  return processed;
 }
 
 function buildSchemaModel(xsdDocs) {
@@ -698,11 +676,21 @@ function buildSchemaModel(xsdDocs) {
       const localName = getLocalName(node);
       const parentLocalName = node.parentElement ? getLocalName(node.parentElement) : "";
 
-      if (parentLocalName === "schema" && localName === "element" && node.getAttribute("name")) {
+      if (
+        parentLocalName === "schema" &&
+        localName === "element" &&
+        node.getAttribute("name") &&
+        isValidXmlName(node.getAttribute("name"))
+      ) {
         model.globalElements.set(node.getAttribute("name"), node);
       }
 
-      if (parentLocalName === "schema" && localName === "complexType" && node.getAttribute("name")) {
+      if (
+        parentLocalName === "schema" &&
+        localName === "complexType" &&
+        node.getAttribute("name") &&
+        isValidXmlName(node.getAttribute("name"))
+      ) {
         model.complexTypes.set(node.getAttribute("name"), node);
       }
     });
@@ -774,19 +762,20 @@ function resolveComplexTypeRule(complexTypeNode, schemaModel, visitedTypeNames) 
     const childName = getLocalName(child);
 
     if (childName === "attribute") {
-      if (child.getAttribute("use") === "required" && child.getAttribute("name")) {
-        rule.requiredAttributes.push(child.getAttribute("name"));
+      const attrName = child.getAttribute("name");
+      if (child.getAttribute("use") === "required" && attrName && isValidXmlName(attrName)) {
+        rule.requiredAttributes.push(attrName);
       }
       return;
     }
 
     if (childName === "sequence" || childName === "all") {
-      parseModelGroup(child, schemaModel, rule, visitedTypeNames, false);
+      parseModelGroup(child, rule, false);
       return;
     }
 
     if (childName === "choice") {
-      parseModelGroup(child, schemaModel, rule, visitedTypeNames, true);
+      parseModelGroup(child, rule, true);
       return;
     }
 
@@ -807,17 +796,18 @@ function resolveComplexTypeRule(complexTypeNode, schemaModel, visitedTypeNames) 
           const extName = getLocalName(extChild);
 
           if (extName === "attribute") {
-            if (extChild.getAttribute("use") === "required" && extChild.getAttribute("name")) {
-              rule.requiredAttributes.push(extChild.getAttribute("name"));
+            const attrName = extChild.getAttribute("name");
+            if (extChild.getAttribute("use") === "required" && attrName && isValidXmlName(attrName)) {
+              rule.requiredAttributes.push(attrName);
             }
           }
 
           if (extName === "sequence" || extName === "all") {
-            parseModelGroup(extChild, schemaModel, rule, visitedTypeNames, false);
+            parseModelGroup(extChild, rule, false);
           }
 
           if (extName === "choice") {
-            parseModelGroup(extChild, schemaModel, rule, visitedTypeNames, true);
+            parseModelGroup(extChild, rule, true);
           }
         });
       }
@@ -827,7 +817,7 @@ function resolveComplexTypeRule(complexTypeNode, schemaModel, visitedTypeNames) 
   return normalizeRule(rule);
 }
 
-function parseModelGroup(groupNode, schemaModel, rule, visitedTypeNames, treatAsChoice) {
+function parseModelGroup(groupNode, rule, treatAsChoice) {
   const requiredChoice = [];
 
   Array.from(groupNode.children).forEach((child) => {
@@ -838,7 +828,7 @@ function parseModelGroup(groupNode, schemaModel, rule, visitedTypeNames, treatAs
       const isRequired = minOccurs > 0;
       const targetName = child.getAttribute("name") || localTypeName(child.getAttribute("ref"));
 
-      if (!targetName) {
+      if (!targetName || !isValidXmlName(targetName)) {
         return;
       }
 
@@ -853,12 +843,12 @@ function parseModelGroup(groupNode, schemaModel, rule, visitedTypeNames, treatAs
     }
 
     if (childName === "sequence" || childName === "all") {
-      parseModelGroup(child, schemaModel, rule, visitedTypeNames, false);
+      parseModelGroup(child, rule, false);
       return;
     }
 
     if (childName === "choice") {
-      parseModelGroup(child, schemaModel, rule, visitedTypeNames, true);
+      parseModelGroup(child, rule, true);
     }
   });
 
@@ -943,6 +933,10 @@ function renderResult({ result, rootName, namespace, detectedTypeLabel, errors, 
   }
 
   result.innerHTML = html;
+}
+
+function isValidXmlName(value) {
+  return /^[A-Za-z_][A-Za-z0-9._-]*$/.test(String(value || ""));
 }
 
 function parseOccurs(value, defaultValue) {
