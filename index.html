@@ -3,48 +3,306 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>InfraModel 4.2 Validator</title>
+  <title>InfraModel Validator</title>
   <style>
+    :root {
+      --bg: #0b1020;
+      --bg-soft: #121933;
+      --panel: rgba(18, 25, 51, 0.82);
+      --panel-border: rgba(255, 255, 255, 0.08);
+      --text: #e8ecf8;
+      --muted: #aeb8d4;
+      --accent: #6ea8ff;
+      --accent-strong: #8cc3ff;
+      --success: #7ee0a1;
+      --error: #ff8f8f;
+      --warning: #ffd27a;
+      --shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+      --radius: 20px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      min-height: 100%;
+      font-family: Inter, Arial, sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(110, 168, 255, 0.18), transparent 32%),
+        radial-gradient(circle at top right, rgba(126, 224, 161, 0.12), transparent 28%),
+        linear-gradient(180deg, #0a0f1d 0%, #0b1020 100%);
+      color: var(--text);
+    }
+
     body {
-      font-family: Arial, sans-serif;
-      max-width: 800px;
-      margin: 40px auto;
-      padding: 20px;
+      padding: 32px 20px 48px;
     }
+
+    .container {
+      max-width: 920px;
+      margin: 0 auto;
+    }
+
+    .hero {
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 28px;
+      padding: 40px 32px 30px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(12px);
+    }
+
+    .eyebrow {
+      display: inline-block;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(110, 168, 255, 0.12);
+      color: var(--accent-strong);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      margin-bottom: 18px;
+    }
+
     h1 {
-      color: #2c3e50;
+      margin: 0 0 14px;
+      font-size: clamp(32px, 5vw, 48px);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
     }
-    .box {
-      border: 2px dashed #ccc;
-      padding: 20px;
-      margin-bottom: 20px;
+
+    .lead {
+      margin: 0;
+      max-width: 740px;
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.7;
     }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 22px;
+      margin-top: 24px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: var(--radius);
+      padding: 24px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(12px);
+    }
+
+    .card h2 {
+      margin: 0 0 14px;
+      font-size: 20px;
+      letter-spacing: -0.02em;
+    }
+
+    .card p,
+    .card li {
+      color: var(--muted);
+      line-height: 1.7;
+      font-size: 15px;
+    }
+
+    .card ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    .upload-box {
+      margin-top: 24px;
+      background: linear-gradient(180deg, rgba(110, 168, 255, 0.08), rgba(255, 255, 255, 0.03));
+      border: 1px solid rgba(110, 168, 255, 0.18);
+      border-radius: 24px;
+      padding: 26px;
+      box-shadow: var(--shadow);
+    }
+
+    .upload-inner {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      align-items: center;
+    }
+
+    .file-input {
+      flex: 1 1 320px;
+      min-width: 220px;
+      padding: 14px 16px;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+    }
+
+    .file-input::file-selector-button {
+      margin-right: 14px;
+      padding: 10px 14px;
+      border: none;
+      border-radius: 10px;
+      background: rgba(110, 168, 255, 0.18);
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    .button {
+      appearance: none;
+      border: none;
+      border-radius: 14px;
+      padding: 14px 20px;
+      font-size: 15px;
+      font-weight: 700;
+      color: #08101f;
+      background: linear-gradient(135deg, var(--accent-strong), var(--success));
+      cursor: pointer;
+      transition: transform 0.15s ease, filter 0.15s ease;
+      white-space: nowrap;
+    }
+
+    .button:hover {
+      transform: translateY(-1px);
+      filter: brightness(1.03);
+    }
+
+    .button:active {
+      transform: translateY(0);
+    }
+
     .result {
-      background: #f4f4f4;
-      padding: 15px;
+      margin-top: 22px;
+      min-height: 140px;
+      background: rgba(7, 12, 26, 0.68);
+      border: 1px solid var(--panel-border);
+      border-radius: 18px;
+      padding: 20px;
       white-space: pre-wrap;
+      line-height: 1.65;
+      color: var(--text);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
     }
-    .success { color: green; }
-    .error { color: red; }
+
+    .success {
+      color: var(--success);
+      font-weight: 700;
+    }
+
+    .error {
+      color: var(--error);
+      font-weight: 700;
+    }
+
+    .footer-note {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .disclaimer {
+      margin-top: 24px;
+      border-left: 4px solid var(--warning);
+      background: rgba(255, 210, 122, 0.08);
+      border-radius: 14px;
+      padding: 16px 18px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .disclaimer strong {
+      color: #ffe7aa;
+    }
+
+    @media (max-width: 780px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .hero {
+        padding: 30px 22px 24px;
+      }
+
+      .card,
+      .upload-box {
+        padding: 20px;
+      }
+
+      .upload-inner {
+        align-items: stretch;
+      }
+
+      .button {
+        width: 100%;
+      }
+    }
   </style>
 </head>
 <body>
+  <main class="container">
+    <section class="hero">
+      <div class="eyebrow">InfraModel XML -tarkistus</div>
+      <h1>InfraModel Validator</h1>
+      <p class="lead">
+        InfraModel Validator on selainpohjainen työkalu InfraModel XML -aineistojen rakenteen
+        tarkistamiseen. Tiedosto käsitellään käyttäjän omassa selaimessa, eikä aineistoa lähetetä
+        palvelimelle tarkistusta varten.
+      </p>
 
-<h1>InfraModel 4.2.0 Validator</h1>
+      <div class="grid">
+        <section class="card">
+          <h2>Toimintaperiaate</h2>
+          <p>
+            Työkalu lukee lataamasi XML-tiedoston, tunnistaa InfraModel-version ja sisältötyypin,
+            ja tekee sen jälkeen tarkistuksia version sekä rakenteen perusteella. Tarkistus hyödyntää
+            sivustolle lisättyjä skeematiedostoja ja täydentäviä sääntöjä.
+          </p>
+          <p>
+            Tavoitteena on auttaa havaitsemaan tavallisimpia rakenteellisia puutteita, mutta
+            tarkistus ei vielä korvaa virallista tai täydellistä tuotantokäyttöön tarkoitettua
+            validointiprosessia.
+          </p>
+        </section>
 
-<p>
-Lataa XML-tiedosto tarkistettavaksi.<br />
-XML käsitellään selaimessasi. Sivu hakee vain validointiin tarvittavat skeemat verkosta.
-</p>
+        <aside class="card">
+          <h2>Mitä sivu tarkistaa</h2>
+          <ul>
+            <li>XML-rakenteen peruskelvollisuus</li>
+            <li>InfraModel-version tunnistus</li>
+            <li>Namespace- ja juurielementtitarkistukset</li>
+            <li>Sisältötyyppikohtaiset pakolliset rakenteet</li>
+            <li>Osan XSD-säännöistä version mukaan</li>
+          </ul>
+        </aside>
+      </div>
 
-<div class="box">
-  <input type="file" id="fileInput" accept=".xml" />
-  <button onclick="validateXML()">Tarkista</button>
-</div>
+      <section class="upload-box">
+        <div class="upload-inner">
+          <input class="file-input" type="file" id="fileInput" accept=".xml" />
+          <button class="button" onclick="validateXML()">Tarkista tiedosto</button>
+        </div>
 
-<div id="result" class="result"></div>
+        <div id="result" class="result"></div>
 
-<script type="module" src="app.js"></script>
+        <p class="footer-note">
+          Tuetut versiot: InfraModel 4.0.4, 4.1 ja 4.2.0
+        </p>
+      </section>
 
+      <div class="disclaimer">
+        <strong>Huomio:</strong> tämä on kehityksessä oleva sivusto. Tarkistustulokset voivat sisältää
+        puutteita, virheitä tai tulkintaeroja. Sivuston käyttö ja sen antamien tulosten hyödyntäminen
+        tapahtuu täysin käyttäjän omalla vastuulla.
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="app.js"></script>
 </body>
 </html>
