@@ -1,22 +1,36 @@
 window.validateXML = validateXML;
 
-const EXPECTED_NAMESPACES = {
-  default: "http://buildingsmart.fi/inframodel/404",
-  im: "http://buildingsmart.fi/im/404"
+const VERSION_CONFIG = {
+  "4.2.0": {
+    label: "InfraModel 4.2.0",
+    defaultNamespace: "http://buildingsmart.fi/inframodel/404",
+    imNamespace: "http://buildingsmart.fi/im/404",
+    schemas: {
+      inframodel: "./schemas/4.2.0/inframodel.xsd",
+      im: "./schemas/4.2.0/im.xsd"
+    }
+  },
+  "4.1": {
+    label: "InfraModel 4.1",
+    defaultNamespace: "http://buildingsmart.fi/inframodel/404",
+    imNamespace: "http://buildingsmart.fi/im/404",
+    schemas: {
+      inframodel: "./schemas/4.1/inframodel.xsd",
+      im: "./schemas/4.1/im.xsd"
+    }
+  },
+  "4.0.4": {
+    label: "InfraModel 4.0.4",
+    defaultNamespace: "http://buildingsmart.fi/inframodel/404",
+    imNamespace: "http://buildingsmart.fi/im/404",
+    schemas: {
+      inframodel: "./schemas/4.0.4/inframodel.xsd",
+      im: "./schemas/4.0.4/im.xsd"
+    }
+  }
 };
 
-const XSD_SOURCES = [
-  {
-    name: "inframodel.xsd",
-    url: "https://github.com/buildingSMART-Finland/InfraModel/releases/download/4.2.0/inframodel.xsd"
-  },
-  {
-    name: "im.xsd",
-    url: "https://github.com/buildingSMART-Finland/InfraModel/releases/download/4.2.0/im.xsd"
-  }
-];
-
-let schemaModelCache = null;
+const schemaModelCache = new Map();
 
 async function validateXML() {
   const fileInput = document.getElementById("fileInput");
@@ -49,16 +63,26 @@ async function validateXML() {
   const rootName = getLocalName(root);
   const namespace = root.namespaceURI || "";
 
-  let schemaModel = null;
+  const detectedVersion = detectInfraModelVersion(xmlDoc);
+  infos.push(`Tunnistettu versio: ${detectedVersion.label}`);
 
-  try {
-    schemaModel = await loadSchemaModel();
-    infos.push("Julkaistut XSD-säännöt ladattu");
-  } catch (error) {
-    warnings.push(`XSD-sääntöjen lataus epäonnistui: ${String(error)}`);
+  let schemaModel = null;
+  let versionConfig = null;
+
+  if (detectedVersion.key && VERSION_CONFIG[detectedVersion.key]) {
+    versionConfig = VERSION_CONFIG[detectedVersion.key];
+
+    try {
+      schemaModel = await loadSchemaModelForVersion(detectedVersion.key);
+      infos.push(`Version ${detectedVersion.key} skeemat ladattu paikallisesti`);
+    } catch (error) {
+      warnings.push(`Version ${detectedVersion.key} skeemojen lataus epäonnistui: ${String(error)}`);
+    }
+  } else {
+    warnings.push("Tiedoston versiota ei pystytty tunnistamaan tuettuihin versioihin 4.0.4 / 4.1 / 4.2.0");
   }
 
-  validateGeneralStructure(xmlDoc, errors, warnings, infos);
+  validateGeneralStructure(xmlDoc, versionConfig, errors, warnings, infos);
 
   const detectedType = detectInfraModelContentType(xmlDoc);
   infos.push(`Tunnistettu sisältötyyppi: ${detectedType.label}`);
@@ -74,13 +98,45 @@ async function validateXML() {
     rootName,
     namespace,
     detectedTypeLabel: detectedType.label,
+    versionLabel: detectedVersion.label,
     errors,
     warnings,
     infos
   });
 }
 
-function validateGeneralStructure(xmlDoc, errors, warnings, infos) {
+function detectInfraModelVersion(xmlDoc) {
+  const root = xmlDoc.documentElement;
+  const versionAttr =
+    root.getAttribute("version") ||
+    root.getAttribute("Version") ||
+    "";
+
+  const schemaLocation =
+    root.getAttributeNS("http://www.w3.org/2001/XMLSchema-instance", "schemaLocation") ||
+    root.getAttribute("xsi:schemaLocation") ||
+    "";
+
+  if (versionAttr === "4.2.0" || schemaLocation.includes("/4.2.0/")) {
+    return { key: "4.2.0", label: "4.2.0" };
+  }
+
+  if (versionAttr === "4.1" || versionAttr === "4.1.0" || schemaLocation.includes("/4.1/") || schemaLocation.includes("/4.1.0/")) {
+    return { key: "4.1", label: "4.1" };
+  }
+
+  if (versionAttr === "4.0.4" || schemaLocation.includes("/4.0.4/")) {
+    return { key: "4.0.4", label: "4.0.4" };
+  }
+
+  if (root.namespaceURI === "http://buildingsmart.fi/inframodel/404") {
+    return { key: null, label: "InfraModel 4.x (tarkka versio ei selvinnyt)" };
+  }
+
+  return { key: null, label: "ei tunnistettu" };
+}
+
+function validateGeneralStructure(xmlDoc, versionConfig, errors, warnings, infos) {
   const root = xmlDoc.documentElement;
   const rootName = getLocalName(root);
 
@@ -104,15 +160,15 @@ function validateGeneralStructure(xmlDoc, errors, warnings, infos) {
 
   if (!defaultNs) {
     errors.push("Namespace puuttuu juurielementiltä");
-  } else if (defaultNs !== EXPECTED_NAMESPACES.default) {
+  } else if (versionConfig && defaultNs !== versionConfig.defaultNamespace) {
     errors.push(
-      `Oletusnamespace ei ole InfraModelin mukainen (nyt: ${defaultNs}, odotettu: ${EXPECTED_NAMESPACES.default})`
+      `Oletusnamespace ei vastaa tunnistetun version skeemaa (nyt: ${defaultNs}, odotettu: ${versionConfig.defaultNamespace})`
     );
   }
 
-  if (imNs && imNs !== EXPECTED_NAMESPACES.im) {
+  if (versionConfig && imNs && imNs !== versionConfig.imNamespace) {
     warnings.push(
-      `im-namespace poikkeaa odotetusta (nyt: ${imNs}, odotettu: ${EXPECTED_NAMESPACES.im})`
+      `im-namespace poikkeaa tunnistetun version odotuksesta (nyt: ${imNs}, odotettu: ${versionConfig.imNamespace})`
     );
   }
 
@@ -127,22 +183,12 @@ function validateGeneralStructure(xmlDoc, errors, warnings, infos) {
     infos.push("xsi:schemaLocation löytyi");
   }
 
-  const requiredRootAttributes = ["date", "time", "version", "language", "readOnly"];
-  requiredRootAttributes.forEach((attrName) => {
-    if (!root.hasAttribute(attrName)) {
-      warnings.push(`Juurielementiltä puuttuu suositeltu attribuutti: ${attrName}`);
-    }
-  });
-
   const project = findFirstElement(xmlDoc, "Project");
   if (!project) {
     warnings.push("Project-elementtiä ei löytynyt");
   } else {
     if (!project.getAttribute("name")) {
       warnings.push("Project-elementiltä puuttuu name-attribuutti");
-    }
-    if (!project.getAttribute("desc")) {
-      warnings.push("Project-elementiltä puuttuu desc-attribuutti");
     }
   }
 
@@ -242,14 +288,7 @@ function validateAlignmentContent(xmlDoc, schemaModel, errors, warnings) {
   }
 
   if (alignmentsContainer && schemaModel) {
-    validateElementWithSchemaRule(
-      alignmentsContainer,
-      "Alignments",
-      schemaModel,
-      "Alignments",
-      errors,
-      warnings
-    );
+    validateElementWithSchemaRule(alignmentsContainer, "Alignments", schemaModel, "Alignments", errors, warnings);
   }
 
   if (alignmentList.length === 0) {
@@ -261,22 +300,7 @@ function validateAlignmentContent(xmlDoc, schemaModel, errors, warnings) {
     const number = index + 1;
 
     if (schemaModel) {
-      validateElementWithSchemaRule(
-        alignment,
-        "Alignment",
-        schemaModel,
-        `Alignment #${number}`,
-        errors,
-        warnings
-      );
-    }
-
-    if (!alignment.getAttribute("name")) {
-      warnings.push(`Alignment #${number}: name-attribuutti puuttuu`);
-    }
-
-    if (!alignment.getAttribute("length")) {
-      warnings.push(`Alignment #${number}: length-attribuutti puuttuu`);
+      validateElementWithSchemaRule(alignment, "Alignment", schemaModel, `Alignment #${number}`, errors, warnings);
     }
 
     const coordGeom = findFirstChildElement(alignment, "CoordGeom");
@@ -285,114 +309,18 @@ function validateAlignmentContent(xmlDoc, schemaModel, errors, warnings) {
       return;
     }
 
-    if (schemaModel) {
-      validateElementWithSchemaRule(
-        coordGeom,
-        "CoordGeom",
-        schemaModel,
-        `Alignment #${number} CoordGeom`,
-        errors,
-        warnings
-      );
-    }
-
     const lines = findChildElementsDeep(coordGeom, "Line");
     const curves = findChildElementsDeep(coordGeom, "Curve");
     const spirals = findChildElementsDeep(coordGeom, "Spiral");
-    const totalGeom = lines.length + curves.length + spirals.length;
 
-    if (totalGeom === 0) {
+    if (lines.length + curves.length + spirals.length === 0) {
       errors.push(`Alignment #${number}: CoordGeom ei sisällä geometriaelementtejä (Line/Curve/Spiral)`);
     }
-
-    lines.forEach((line, lineIndex) => {
-      if (schemaModel) {
-        validateElementWithSchemaRule(
-          line,
-          "Line",
-          schemaModel,
-          `Alignment #${number}, Line #${lineIndex + 1}`,
-          errors,
-          warnings
-        );
-      }
-
-      validateStartEndPoints(
-        line,
-        `Alignment #${number}, Line #${lineIndex + 1}`,
-        errors,
-        warnings
-      );
-
-      if (!line.getAttribute("length")) {
-        warnings.push(`Alignment #${number}, Line #${lineIndex + 1}: length-attribuutti puuttuu`);
-      }
-    });
-
-    curves.forEach((curve, curveIndex) => {
-      if (schemaModel) {
-        validateElementWithSchemaRule(
-          curve,
-          "Curve",
-          schemaModel,
-          `Alignment #${number}, Curve #${curveIndex + 1}`,
-          errors,
-          warnings
-        );
-      }
-
-      validateStartEndPoints(
-        curve,
-        `Alignment #${number}, Curve #${curveIndex + 1}`,
-        errors,
-        warnings
-      );
-
-      if (!curve.getAttribute("radius")) {
-        warnings.push(`Alignment #${number}, Curve #${curveIndex + 1}: radius-attribuutti puuttuu`);
-      }
-    });
-
-    spirals.forEach((spiral, spiralIndex) => {
-      if (schemaModel) {
-        validateElementWithSchemaRule(
-          spiral,
-          "Spiral",
-          schemaModel,
-          `Alignment #${number}, Spiral #${spiralIndex + 1}`,
-          errors,
-          warnings
-        );
-      }
-
-      validateStartEndPoints(
-        spiral,
-        `Alignment #${number}, Spiral #${spiralIndex + 1}`,
-        errors,
-        warnings
-      );
-    });
   });
 }
 
 function validateSurfaceContent(xmlDoc, schemaModel, errors, warnings) {
-  const surfacesContainer = findFirstElement(xmlDoc, "Surfaces");
   const surfaces = findElements(xmlDoc, "Surface");
-
-  if (!surfacesContainer && surfaces.length > 0) {
-    warnings.push("Surface-elementtejä löytyi, mutta niitä kokoavaa Surfaces-elementtiä ei löytynyt");
-  }
-
-  if (surfacesContainer && schemaModel) {
-    validateElementWithSchemaRule(
-      surfacesContainer,
-      "Surfaces",
-      schemaModel,
-      "Surfaces",
-      errors,
-      warnings
-    );
-  }
 
   if (surfaces.length === 0) {
     errors.push("Tiedosto näyttää pintamallilta, mutta Surface-elementtejä ei löytynyt");
@@ -403,18 +331,7 @@ function validateSurfaceContent(xmlDoc, schemaModel, errors, warnings) {
     const number = index + 1;
 
     if (schemaModel) {
-      validateElementWithSchemaRule(
-        surface,
-        "Surface",
-        schemaModel,
-        `Surface #${number}`,
-        errors,
-        warnings
-      );
-    }
-
-    if (!surface.getAttribute("name")) {
-      warnings.push(`Surface #${number}: name-attribuutti puuttuu`);
+      validateElementWithSchemaRule(surface, "Surface", schemaModel, `Surface #${number}`, errors, warnings);
     }
 
     const definition = findFirstChildElement(surface, "Definition");
@@ -422,92 +339,11 @@ function validateSurfaceContent(xmlDoc, schemaModel, errors, warnings) {
       errors.push(`Surface #${number}: pakollinen Definition-elementti puuttuu`);
       return;
     }
-
-    if (schemaModel) {
-      validateElementWithSchemaRule(
-        definition,
-        "Definition",
-        schemaModel,
-        `Surface #${number} Definition`,
-        errors,
-        warnings
-      );
-    }
-
-    const pntsNode = findFirstChildElement(definition, "Pnts");
-    const facesNode = findFirstChildElement(definition, "Faces");
-
-    const pointNodes = pntsNode ? findChildElementsDeep(pntsNode, "P") : [];
-    const faceNodes = facesNode ? findChildElementsDeep(facesNode, "F") : [];
-
-    if (!pntsNode) {
-      errors.push(`Surface #${number}: Definition-elementin alta puuttuu Pnts`);
-    } else if (schemaModel) {
-      validateElementWithSchemaRule(
-        pntsNode,
-        "Pnts",
-        schemaModel,
-        `Surface #${number} Pnts`,
-        errors,
-        warnings
-      );
-    }
-
-    if (!facesNode) {
-      errors.push(`Surface #${number}: Definition-elementin alta puuttuu Faces`);
-    } else if (schemaModel) {
-      validateElementWithSchemaRule(
-        facesNode,
-        "Faces",
-        schemaModel,
-        `Surface #${number} Faces`,
-        errors,
-        warnings
-      );
-    }
-
-    if (pointNodes.length === 0) {
-      errors.push(`Surface #${number}: Pnts-elementti ei sisällä yhtään P-pistettä`);
-    }
-
-    if (faceNodes.length === 0) {
-      errors.push(`Surface #${number}: Faces-elementti ei sisällä yhtään F-kolmiota`);
-    }
-
-    pointNodes.forEach((point, pointIndex) => {
-      const text = normalizeWhitespace(point.textContent);
-      if (!text) {
-        errors.push(`Surface #${number}, P #${pointIndex + 1}: pisteen koordinaattisisältö puuttuu`);
-      }
-    });
-
-    faceNodes.forEach((face, faceIndex) => {
-      const text = normalizeWhitespace(face.textContent);
-      if (!text) {
-        errors.push(`Surface #${number}, F #${faceIndex + 1}: kolmion indeksisisältö puuttuu`);
-      }
-    });
   });
 }
 
 function validatePipeContent(xmlDoc, schemaModel, errors, warnings) {
-  const networksContainer = findFirstElement(xmlDoc, "PipeNetworks");
   const networks = findElements(xmlDoc, "PipeNetwork");
-
-  if (!networksContainer && networks.length > 0) {
-    warnings.push("PipeNetwork-elementtejä löytyi, mutta niitä kokoavaa PipeNetworks-elementtiä ei löytynyt");
-  }
-
-  if (networksContainer && schemaModel) {
-    validateElementWithSchemaRule(
-      networksContainer,
-      "PipeNetworks",
-      schemaModel,
-      "PipeNetworks",
-      errors,
-      warnings
-    );
-  }
 
   if (networks.length === 0) {
     errors.push("Tiedosto näyttää verkostoaineistolta, mutta PipeNetwork-elementtejä ei löytynyt");
@@ -518,58 +354,13 @@ function validatePipeContent(xmlDoc, schemaModel, errors, warnings) {
     const number = index + 1;
 
     if (schemaModel) {
-      validateElementWithSchemaRule(
-        network,
-        "PipeNetwork",
-        schemaModel,
-        `PipeNetwork #${number}`,
-        errors,
-        warnings
-      );
+      validateElementWithSchemaRule(network, "PipeNetwork", schemaModel, `PipeNetwork #${number}`, errors, warnings);
     }
-
-    if (!network.getAttribute("name")) {
-      warnings.push(`PipeNetwork #${number}: name-attribuutti puuttuu`);
-    }
-
-    const pipes = findChildElementsDeep(network, "Pipe");
-    const structures = findChildElementsDeep(network, "Struct");
-    const fittings = findChildElementsDeep(network, "Fitting");
-    const appurtenances = findChildElementsDeep(network, "Appurtenance");
-
-    const totalNetworkObjects =
-      pipes.length + structures.length + fittings.length + appurtenances.length;
-
-    if (totalNetworkObjects === 0) {
-      errors.push(`PipeNetwork #${number}: verkoston sisältö puuttuu (Pipe/Struct/Fitting/Appurtenance)`);
-    }
-
-    pipes.forEach((pipe, pipeIndex) => {
-      if (!pipe.getAttribute("name")) {
-        warnings.push(`PipeNetwork #${number}, Pipe #${pipeIndex + 1}: name-attribuutti puuttuu`);
-      }
-    });
   });
 }
 
 function validatePointContent(xmlDoc, schemaModel, errors, warnings) {
-  const cgPointsContainer = findFirstElement(xmlDoc, "CgPoints");
   const cgPoints = findElements(xmlDoc, "CgPoint");
-
-  if (!cgPointsContainer && cgPoints.length > 0) {
-    warnings.push("CgPoint-elementtejä löytyi, mutta niitä kokoavaa CgPoints-elementtiä ei löytynyt");
-  }
-
-  if (cgPointsContainer && schemaModel) {
-    validateElementWithSchemaRule(
-      cgPointsContainer,
-      "CgPoints",
-      schemaModel,
-      "CgPoints",
-      errors,
-      warnings
-    );
-  }
 
   if (cgPoints.length === 0) {
     errors.push("Tiedosto näyttää pisteaineistolta, mutta CgPoint-elementtejä ei löytynyt");
@@ -580,25 +371,12 @@ function validatePointContent(xmlDoc, schemaModel, errors, warnings) {
     const number = index + 1;
 
     if (schemaModel) {
-      validateElementWithSchemaRule(
-        point,
-        "CgPoint",
-        schemaModel,
-        `CgPoint #${number}`,
-        errors,
-        warnings
-      );
+      validateElementWithSchemaRule(point, "CgPoint", schemaModel, `CgPoint #${number}`, errors, warnings);
     }
 
     const text = normalizeWhitespace(point.textContent);
-
     if (!text) {
-      errors.push(`CgPoint #${number}: pakollinen koordinaattisisältö puuttuu`);
-    }
-
-    const parts = text.split(/\s+/).filter(Boolean);
-    if (parts.length < 2) {
-      errors.push(`CgPoint #${number}: koordinaatteja on liian vähän`);
+      errors.push(`CgPoint #${number}: koordinaattisisältö puuttuu`);
     }
   });
 }
@@ -610,56 +388,47 @@ function validateGenericLandXMLContent(xmlDoc, schemaModel, errors, warnings) {
     warnings.push("Units-elementtiä ei löytynyt juurielementin alta");
   }
 
-  const knownTopLevelNames = [
-    "Project",
-    "Units",
-    "Alignments",
-    "Surfaces",
-    "PipeNetworks",
-    "CgPoints",
-    "Parcels",
-    "FeatureDictionary"
-  ];
-
-  const topLevelChildren = Array.from(root.children).map(getLocalName);
-  const matchedKnown = topLevelChildren.filter((name) => knownTopLevelNames.includes(name));
-
-  if (matchedKnown.length === 0) {
-    warnings.push("Juurielementin alta ei löytynyt tunnistettuja LandXML/InfraModel-rakenteita");
-  }
-
   if (schemaModel) {
     validateElementWithSchemaRule(root, "LandXML", schemaModel, "LandXML", errors, warnings);
   }
 }
 
-async function loadSchemaModel() {
-  if (schemaModelCache) {
-    return schemaModelCache;
+async function loadSchemaModelForVersion(versionKey) {
+  if (schemaModelCache.has(versionKey)) {
+    return schemaModelCache.get(versionKey);
   }
 
-  const docs = await Promise.all(
-    XSD_SOURCES.map(async (source) => {
-      const response = await fetch(source.url, { cache: "force-cache" });
+  const config = VERSION_CONFIG[versionKey];
+  if (!config) {
+    throw new Error(`Tuntematon versio: ${versionKey}`);
+  }
 
-      if (!response.ok) {
-        throw new Error(`XSD-tiedoston lataus epäonnistui: ${source.name} (${response.status})`);
-      }
+  const docs = await Promise.all([
+    loadXmlDocument(config.schemas.inframodel, `inframodel.xsd (${versionKey})`),
+    loadXmlDocument(config.schemas.im, `im.xsd (${versionKey})`)
+  ]);
 
-      const text = await response.text();
-      const doc = new DOMParser().parseFromString(text, "application/xml");
-      const parseError = doc.querySelector("parsererror");
+  const model = buildSchemaModel(docs);
+  schemaModelCache.set(versionKey, model);
+  return model;
+}
 
-      if (parseError) {
-        throw new Error(`XSD-tiedosto ei ole kelvollinen XML: ${source.name}`);
-      }
+async function loadXmlDocument(url, label) {
+  const response = await fetch(url, { cache: "force-cache" });
 
-      return doc;
-    })
-  );
+  if (!response.ok) {
+    throw new Error(`${label} lataus epäonnistui (${response.status})`);
+  }
 
-  schemaModelCache = buildSchemaModel(docs);
-  return schemaModelCache;
+  const text = await response.text();
+  const doc = new DOMParser().parseFromString(text, "application/xml");
+  const parseError = doc.querySelector("parsererror");
+
+  if (parseError) {
+    throw new Error(`${label} ei ole kelvollinen XML`);
+  }
+
+  return doc;
 }
 
 function buildSchemaModel(xsdDocs) {
@@ -883,58 +652,6 @@ function validateElementWithSchemaRule(xmlElement, schemaElementName, schemaMode
   });
 }
 
-function validateStartEndPoints(element, label, errors, warnings) {
-  const start = findFirstChildElement(element, "Start");
-  const end = findFirstChildElement(element, "End");
-
-  if (!start) {
-    errors.push(`${label}: Start-elementti puuttuu`);
-  } else if (!normalizeWhitespace(start.textContent)) {
-    errors.push(`${label}: Start-elementin koordinaattisisältö puuttuu`);
-  }
-
-  if (!end) {
-    errors.push(`${label}: End-elementti puuttuu`);
-  } else if (!normalizeWhitespace(end.textContent)) {
-    errors.push(`${label}: End-elementin koordinaattisisältö puuttuu`);
-  }
-
-  if (!element.getAttribute("staStart")) {
-    warnings.push(`${label}: staStart-attribuutti puuttuu`);
-  }
-}
-
-function renderResult({ result, rootName, namespace, detectedTypeLabel, errors, warnings, infos }) {
-  const summaryClass = errors.length === 0 ? "success" : "error";
-  const summaryText =
-    errors.length === 0
-      ? "✅ XML läpäisi nykyisen tarkistuksen"
-      : "❌ XML:ssä havaittiin validointiongelmia";
-
-  let html = `<span class="${summaryClass}">${summaryText}</span>\n\n`;
-  html += `Root: ${escapeHtml(rootName)}\n`;
-  html += `Namespace: ${escapeHtml(namespace || "ei määritelty")}\n`;
-  html += `Sisältötyyppi: ${escapeHtml(detectedTypeLabel)}\n`;
-
-  if (infos.length) {
-    html += `\n<b>Tiedot:</b>\n${escapeHtml(infos.join("\n"))}\n`;
-  }
-
-  if (errors.length) {
-    html += `\n<b>Virheet:</b>\n${escapeHtml(errors.join("\n"))}\n`;
-  }
-
-  if (warnings.length) {
-    html += `\n<b>Huomautukset:</b>\n${escapeHtml(warnings.join("\n"))}\n`;
-  }
-
-  if (!errors.length && !warnings.length) {
-    html += `\nEi huomautuksia.\n`;
-  }
-
-  result.innerHTML = html;
-}
-
 function isValidXmlName(value) {
   return /^[A-Za-z_][A-Za-z0-9._-]*$/.test(String(value || ""));
 }
@@ -1020,4 +737,36 @@ function escapeHtml(value) {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
+}
+
+function renderResult({ result, rootName, namespace, detectedTypeLabel, versionLabel, errors, warnings, infos }) {
+  const summaryClass = errors.length === 0 ? "success" : "error";
+  const summaryText =
+    errors.length === 0
+      ? "✅ XML läpäisi nykyisen tarkistuksen"
+      : "❌ XML:ssä havaittiin validointiongelmia";
+
+  let html = `<span class="${summaryClass}">${summaryText}</span>\n\n`;
+  html += `Root: ${escapeHtml(rootName)}\n`;
+  html += `Namespace: ${escapeHtml(namespace || "ei määritelty")}\n`;
+  html += `Versio: ${escapeHtml(versionLabel)}\n`;
+  html += `Sisältötyyppi: ${escapeHtml(detectedTypeLabel)}\n`;
+
+  if (infos.length) {
+    html += `\n<b>Tiedot:</b>\n${escapeHtml(infos.join("\n"))}\n`;
+  }
+
+  if (errors.length) {
+    html += `\n<b>Virheet:</b>\n${escapeHtml(errors.join("\n"))}\n`;
+  }
+
+  if (warnings.length) {
+    html += `\n<b>Huomautukset:</b>\n${escapeHtml(warnings.join("\n"))}\n`;
+  }
+
+  if (!errors.length && !warnings.length) {
+    html += `\nEi huomautuksia.\n`;
+  }
+
+  result.innerHTML = html;
 }
