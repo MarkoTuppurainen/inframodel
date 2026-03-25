@@ -30,6 +30,14 @@ const VERSION_CONFIG = {
   }
 };
 
+const SUPPORTED_DEFAULT_NAMESPACES = Array.from(
+  new Set(Object.values(VERSION_CONFIG).map((cfg) => cfg.defaultNamespace))
+);
+
+const SUPPORTED_IM_NAMESPACES = Array.from(
+  new Set(Object.values(VERSION_CONFIG).map((cfg) => cfg.imNamespace))
+);
+
 const schemaModelCache = new Map();
 
 async function validateXML() {
@@ -92,6 +100,7 @@ async function validateXML() {
   }
 
   validateByDetectedType(xmlDoc, detectedType.key, schemaModel, errors, warnings);
+  validateBreakLineCoding(xmlDoc, warnings);
 
   renderResult({
     result,
@@ -121,7 +130,12 @@ function detectInfraModelVersion(xmlDoc) {
     return { key: "4.2.0", label: "4.2.0" };
   }
 
-  if (versionAttr === "4.1" || versionAttr === "4.1.0" || schemaLocation.includes("/4.1/") || schemaLocation.includes("/4.1.0/")) {
+  if (
+    versionAttr === "4.1" ||
+    versionAttr === "4.1.0" ||
+    schemaLocation.includes("/4.1/") ||
+    schemaLocation.includes("/4.1.0/")
+  ) {
     return { key: "4.1", label: "4.1" };
   }
 
@@ -129,7 +143,7 @@ function detectInfraModelVersion(xmlDoc) {
     return { key: "4.0.4", label: "4.0.4" };
   }
 
-  if (root.namespaceURI === "http://buildingsmart.fi/inframodel/404") {
+  if (SUPPORTED_DEFAULT_NAMESPACES.includes(root.namespaceURI || "")) {
     return { key: null, label: "InfraModel 4.x (tarkka versio ei selvinnyt)" };
   }
 
@@ -160,16 +174,26 @@ function validateGeneralStructure(xmlDoc, versionConfig, errors, warnings, infos
 
   if (!defaultNs) {
     errors.push("Namespace puuttuu juurielementiltä");
+  } else if (!SUPPORTED_DEFAULT_NAMESPACES.includes(defaultNs)) {
+    errors.push(
+      `Oletusnamespace ei ole tuettu InfraModel-namespace (nyt: ${defaultNs}, odotettu yksi näistä: ${SUPPORTED_DEFAULT_NAMESPACES.join(", ")})`
+    );
   } else if (versionConfig && defaultNs !== versionConfig.defaultNamespace) {
     errors.push(
       `Oletusnamespace ei vastaa tunnistetun version skeemaa (nyt: ${defaultNs}, odotettu: ${versionConfig.defaultNamespace})`
     );
   }
 
-  if (versionConfig && imNs && imNs !== versionConfig.imNamespace) {
-    warnings.push(
-      `im-namespace poikkeaa tunnistetun version odotuksesta (nyt: ${imNs}, odotettu: ${versionConfig.imNamespace})`
-    );
+  if (imNs) {
+    if (!SUPPORTED_IM_NAMESPACES.includes(imNs)) {
+      warnings.push(
+        `im-namespace ei ole tuettu InfraModel im-namespace (nyt: ${imNs}, odotettu yksi näistä: ${SUPPORTED_IM_NAMESPACES.join(", ")})`
+      );
+    } else if (versionConfig && imNs !== versionConfig.imNamespace) {
+      warnings.push(
+        `im-namespace poikkeaa tunnistetun version odotuksesta (nyt: ${imNs}, odotettu: ${versionConfig.imNamespace})`
+      );
+    }
   }
 
   const schemaLocation = root.getAttributeNS(
@@ -391,6 +415,42 @@ function validateGenericLandXMLContent(xmlDoc, schemaModel, errors, warnings) {
   if (schemaModel) {
     validateElementWithSchemaRule(root, "LandXML", schemaModel, "LandXML", errors, warnings);
   }
+}
+
+function validateBreakLineCoding(xmlDoc, warnings) {
+  const breakLines = findElements(xmlDoc, "BreakLine");
+
+  breakLines.forEach((breakLine, index) => {
+    const number = index + 1;
+    const codingFeature = findFirstFeatureByCode(breakLine, "IM_coding");
+
+    if (!codingFeature) {
+      warnings.push(`BreakLine #${number}: IM_coding-Feature puuttuu`);
+      return;
+    }
+
+    const source = codingFeature.getAttribute("source") || "";
+    if (source && source !== "inframodel") {
+      warnings.push(`BreakLine #${number}: IM_coding-Feature source ei ole 'inframodel' (nyt: ${source})`);
+    }
+
+    const properties = findChildElementsDeep(codingFeature, "Property");
+    const labels = properties
+      .map((property) => property.getAttribute("label") || "")
+      .filter(Boolean);
+
+    if (!labels.includes("terrainCoding")) {
+      warnings.push(`BreakLine #${number}: IM_coding-Featureltä puuttuu terrainCoding`);
+    }
+
+    if (!labels.includes("terrainCodingDesc")) {
+      warnings.push(`BreakLine #${number}: IM_coding-Featureltä puuttuu terrainCodingDesc`);
+    }
+
+    if (!labels.includes("infraCoding")) {
+      warnings.push(`BreakLine #${number}: infraCoding puuttuu (huom: tätä ei käsitellä tässä versiossa yleispakollisena virheenä)`);
+    }
+  });
 }
 
 async function loadSchemaModelForVersion(versionKey) {
@@ -650,6 +710,12 @@ function validateElementWithSchemaRule(xmlElement, schemaElementName, schemaMode
       errors.push(`${label}: XSD:n mukaan vähintään yksi näistä alielementeistä vaaditaan: ${choiceNames.join(", ")}`);
     }
   });
+}
+
+function findFirstFeatureByCode(parent, code) {
+  return findChildElementsDeep(parent, "Feature").find(
+    (feature) => (feature.getAttribute("code") || "") === code
+  ) || null;
 }
 
 function isValidXmlName(value) {
