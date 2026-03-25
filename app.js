@@ -84,25 +84,23 @@ async function validateXML() {
       schemaModel = await loadSchemaModelForVersion(detectedVersion.key);
       infos.push(`Version ${detectedVersion.key} skeemat ladattu paikallisesti`);
     } catch (error) {
-      warnings.push(`Version ${detectedVersion.key} skeemojen lataus epäonnistui: ${String(error)}`);
+      warnings.push(createIssue(`Version ${detectedVersion.key} skeemojen lataus epäonnistui: ${String(error)}`));
     }
   } else {
-    warnings.push("Tiedoston versiota ei pystytty tunnistamaan tuettuihin versioihin 4.0.4 / 4.1 / 4.2.0");
+    warnings.push(createIssue("Tiedoston versiota ei pystytty tunnistamaan tuettuihin versioihin 4.0.4 / 4.1 / 4.2.0"));
   }
 
-  validateGeneralStructure(xmlDoc, versionConfig, errors, warnings, infos);
+  validateGeneralStructure(xmlDoc, xmlText, versionConfig, errors, warnings, infos);
 
   const detectedType = detectInfraModelContentType(xmlDoc);
   infos.push(`Tunnistettu sisältötyyppi: ${detectedType.label}`);
 
   if (schemaModel) {
-    validateDocumentAgainstXsdHints(xmlDoc, schemaModel, errors, warnings);
+    validateDocumentAgainstXsdHints(xmlDoc, xmlText, schemaModel, errors, warnings);
   }
 
-  validateByDetectedType(xmlDoc, detectedType.key, schemaModel, errors, warnings);
-
-  // Käyttöohjeisiin perustuvat lisäsäännöt
-  validateApplicationGuidelineRules(xmlDoc, detectedType.key, errors, warnings);
+  validateByDetectedType(xmlDoc, xmlText, detectedType.key, schemaModel, errors, warnings);
+  validateApplicationGuidelineRules(xmlDoc, xmlText, detectedType.key, errors, warnings);
 
   renderResult({
     result,
@@ -152,12 +150,12 @@ function detectInfraModelVersion(xmlDoc) {
   return { key: null, label: "ei tunnistettu" };
 }
 
-function validateGeneralStructure(xmlDoc, versionConfig, errors, warnings, infos) {
+function validateGeneralStructure(xmlDoc, xmlText, versionConfig, errors, warnings, infos) {
   const root = xmlDoc.documentElement;
   const rootName = getLocalName(root);
 
   if (rootName !== "LandXML") {
-    errors.push(`Root-elementin tulee olla LandXML (nyt: ${rootName})`);
+    errors.push(createIssue(`Root-elementin tulee olla LandXML (nyt: ${rootName})`, root, xmlText));
   }
 
   const version =
@@ -166,7 +164,7 @@ function validateGeneralStructure(xmlDoc, versionConfig, errors, warnings, infos
     "";
 
   if (!version) {
-    warnings.push("Juurielementin version-attribuuttia ei löytynyt");
+    warnings.push(createIssue("Juurielementin version-attribuuttia ei löytynyt", root, xmlText, { attributeName: "version" }));
   } else {
     infos.push(`Version-attribuutti: ${version}`);
   }
@@ -175,25 +173,41 @@ function validateGeneralStructure(xmlDoc, versionConfig, errors, warnings, infos
   const imNs = root.getAttribute("xmlns:im") || "";
 
   if (!defaultNs) {
-    errors.push("Namespace puuttuu juurielementiltä");
+    errors.push(createIssue("Namespace puuttuu juurielementiltä", root, xmlText));
   } else if (!SUPPORTED_DEFAULT_NAMESPACES.includes(defaultNs)) {
     errors.push(
-      `Oletusnamespace ei ole tuettu InfraModel-namespace (nyt: ${defaultNs}, odotettu yksi näistä: ${SUPPORTED_DEFAULT_NAMESPACES.join(", ")})`
+      createIssue(
+        `Oletusnamespace ei ole tuettu InfraModel-namespace (nyt: ${defaultNs}, odotettu yksi näistä: ${SUPPORTED_DEFAULT_NAMESPACES.join(", ")})`,
+        root,
+        xmlText
+      )
     );
   } else if (versionConfig && defaultNs !== versionConfig.defaultNamespace) {
     errors.push(
-      `Oletusnamespace ei vastaa tunnistetun version skeemaa (nyt: ${defaultNs}, odotettu: ${versionConfig.defaultNamespace})`
+      createIssue(
+        `Oletusnamespace ei vastaa tunnistetun version skeemaa (nyt: ${defaultNs}, odotettu: ${versionConfig.defaultNamespace})`,
+        root,
+        xmlText
+      )
     );
   }
 
   if (imNs) {
     if (!SUPPORTED_IM_NAMESPACES.includes(imNs)) {
       warnings.push(
-        `im-namespace ei ole tuettu InfraModel im-namespace (nyt: ${imNs}, odotettu yksi näistä: ${SUPPORTED_IM_NAMESPACES.join(", ")})`
+        createIssue(
+          `im-namespace ei ole tuettu InfraModel im-namespace (nyt: ${imNs}, odotettu yksi näistä: ${SUPPORTED_IM_NAMESPACES.join(", ")})`,
+          root,
+          xmlText
+        )
       );
     } else if (versionConfig && imNs !== versionConfig.imNamespace) {
       warnings.push(
-        `im-namespace poikkeaa tunnistetun version odotuksesta (nyt: ${imNs}, odotettu: ${versionConfig.imNamespace})`
+        createIssue(
+          `im-namespace poikkeaa tunnistetun version odotuksesta (nyt: ${imNs}, odotettu: ${versionConfig.imNamespace})`,
+          root,
+          xmlText
+        )
       );
     }
   }
@@ -204,23 +218,21 @@ function validateGeneralStructure(xmlDoc, versionConfig, errors, warnings, infos
   ) || root.getAttribute("xsi:schemaLocation") || "";
 
   if (!schemaLocation) {
-    warnings.push("xsi:schemaLocation puuttuu");
+    warnings.push(createIssue("xsi:schemaLocation puuttuu", root, xmlText, { attributeName: "xsi:schemaLocation" }));
   } else {
     infos.push("xsi:schemaLocation löytyi");
   }
 
   const units = findFirstElement(xmlDoc, "Units");
   if (!units) {
-    errors.push("Units-elementti puuttuu");
+    errors.push(createIssue("Units-elementti puuttuu", root, xmlText, { childName: "Units" }));
   }
 
   const project = findFirstElement(xmlDoc, "Project");
   if (!project) {
-    warnings.push("Project-elementtiä ei löytynyt");
-  } else {
-    if (!project.getAttribute("name")) {
-      warnings.push("Project-elementiltä puuttuu name-attribuutti");
-    }
+    warnings.push(createIssue("Project-elementtiä ei löytynyt", root, xmlText, { childName: "Project" }));
+  } else if (!project.getAttribute("name")) {
+    warnings.push(createIssue("Project-elementiltä puuttuu name-attribuutti", project, xmlText, { attributeName: "name" }));
   }
 
   const knownTopLevelNames = [
@@ -238,7 +250,7 @@ function validateGeneralStructure(xmlDoc, versionConfig, errors, warnings, infos
   const matchedKnown = topLevelChildren.filter((name) => knownTopLevelNames.includes(name));
 
   if (matchedKnown.length === 0) {
-    warnings.push("Juurielementin alta ei löytynyt tunnistettuja LandXML/InfraModel-rakenteita");
+    warnings.push(createIssue("Juurielementin alta ei löytynyt tunnistettuja LandXML/InfraModel-rakenteita", root, xmlText));
   }
 }
 
@@ -272,40 +284,38 @@ function detectInfraModelContentType(xmlDoc) {
   return { key: "unknown", label: "ei tunnistettu tarkemmin" };
 }
 
-function validateByDetectedType(xmlDoc, typeKey, schemaModel, errors, warnings) {
+function validateByDetectedType(xmlDoc, xmlText, typeKey, schemaModel, errors, warnings) {
   switch (typeKey) {
     case "alignments":
-      validateAlignmentContent(xmlDoc, schemaModel, errors, warnings);
+      validateAlignmentContent(xmlDoc, xmlText, schemaModel, errors, warnings);
       break;
     case "surfaces":
-      validateSurfaceContent(xmlDoc, schemaModel, errors, warnings);
+      validateSurfaceContent(xmlDoc, xmlText, schemaModel, errors, warnings);
       break;
     case "pipes":
-      validatePipeContent(xmlDoc, schemaModel, errors, warnings);
+      validatePipeContent(xmlDoc, xmlText, schemaModel, errors, warnings);
       break;
     case "points":
-      validatePointContent(xmlDoc, schemaModel, errors, warnings);
+      validatePointContent(xmlDoc, xmlText, schemaModel, errors, warnings);
       break;
     case "generic_landxml":
-      validateGenericLandXMLContent(xmlDoc, schemaModel, errors, warnings);
+      validateGenericLandXMLContent(xmlDoc, xmlText, schemaModel, errors, warnings);
       break;
     default:
-      warnings.push("Tiedoston tarkkaa InfraModel-sisältötyyppiä ei tunnistettu, joten tehtiin vain yleiset tarkistukset");
+      warnings.push(createIssue("Tiedoston tarkkaa InfraModel-sisältötyyppiä ei tunnistettu, joten tehtiin vain yleiset tarkistukset"));
       break;
   }
 }
 
-function validateApplicationGuidelineRules(xmlDoc, typeKey, errors, warnings) {
-  // Header- ja yksikkösäännöt
-  validateUnitsContent(xmlDoc, warnings);
+function validateApplicationGuidelineRules(xmlDoc, xmlText, typeKey, errors, warnings) {
+  validateUnitsContent(xmlDoc, xmlText, warnings);
 
-  // Käyttöohjeiden pintamallisäännöt
   if (typeKey === "surfaces") {
-    validateSurfaceGuidelineRules(xmlDoc, errors, warnings);
+    validateSurfaceGuidelineRules(xmlDoc, xmlText, errors, warnings);
   }
 }
 
-function validateUnitsContent(xmlDoc, warnings) {
+function validateUnitsContent(xmlDoc, xmlText, warnings) {
   const units = findFirstElement(xmlDoc, "Units");
   if (!units) {
     return;
@@ -313,7 +323,7 @@ function validateUnitsContent(xmlDoc, warnings) {
 
   const metric = findFirstChildElement(units, "Metric");
   if (!metric) {
-    warnings.push("Units-elementin alta puuttuu Metric");
+    warnings.push(createIssue("Units-elementin alta puuttuu Metric", units, xmlText, { childName: "Metric" }));
     return;
   }
 
@@ -332,12 +342,12 @@ function validateUnitsContent(xmlDoc, warnings) {
 
   recommendedAttrs.forEach((attrName) => {
     if (!metric.hasAttribute(attrName)) {
-      warnings.push(`Units/Metric: suositeltu attribuutti puuttuu: ${attrName}`);
+      warnings.push(createIssue(`Units/Metric: suositeltu attribuutti puuttuu: ${attrName}`, metric, xmlText, { attributeName: attrName }));
     }
   });
 }
 
-function validateSurfaceGuidelineRules(xmlDoc, errors, warnings) {
+function validateSurfaceGuidelineRules(xmlDoc, xmlText, errors, warnings) {
   const surfaces = findElements(xmlDoc, "Surface");
 
   surfaces.forEach((surface, surfaceIndex) => {
@@ -357,6 +367,7 @@ function validateSurfaceGuidelineRules(xmlDoc, errors, warnings) {
       validateSurfaceSourceDataCoding(
         dataPointsGroups.length > 0 ? dataPointsGroups : dataPoints,
         `Surface #${surfaceNo} DataPoints`,
+        xmlText,
         warnings
       );
     }
@@ -365,22 +376,23 @@ function validateSurfaceGuidelineRules(xmlDoc, errors, warnings) {
       validateSurfaceSourceDataCoding(
         breakLinesGroups.length > 0 ? breakLinesGroups : breakLines,
         `Surface #${surfaceNo} BreakLines`,
+        xmlText,
         warnings
       );
     }
 
     const surfaceCodingFeature = findFirstFeatureByCode(surface, "IM_coding");
     if (!surfaceCodingFeature) {
-      warnings.push(`Surface #${surfaceNo}: IM_coding-Feature puuttuu`);
+      warnings.push(createIssue(`Surface #${surfaceNo}: IM_coding-Feature puuttuu`, surface, xmlText));
     } else {
       const labels = extractPropertyLabels(surfaceCodingFeature);
 
       if (!labels.includes("surfaceCoding")) {
-        warnings.push(`Surface #${surfaceNo}: surfaceCoding puuttuu IM_coding-Featureltä`);
+        warnings.push(createIssue(`Surface #${surfaceNo}: surfaceCoding puuttuu IM_coding-Featureltä`, surfaceCodingFeature, xmlText));
       }
 
       if (!labels.includes("surfaceCodingDesc")) {
-        warnings.push(`Surface #${surfaceNo}: surfaceCodingDesc puuttuu IM_coding-Featureltä`);
+        warnings.push(createIssue(`Surface #${surfaceNo}: surfaceCodingDesc puuttuu IM_coding-Featureltä`, surfaceCodingFeature, xmlText));
       }
     }
 
@@ -388,37 +400,36 @@ function validateSurfaceGuidelineRules(xmlDoc, errors, warnings) {
     const facesNode = findFirstDeepChildElement(definition, "Faces");
 
     if (!pntsNode) {
-      errors.push(`Surface #${surfaceNo}: Definition-elementin alta puuttuu Pnts`);
+      errors.push(createIssue(`Surface #${surfaceNo}: Definition-elementin alta puuttuu Pnts`, definition, xmlText, { childName: "Pnts" }));
     }
     if (!facesNode) {
-      errors.push(`Surface #${surfaceNo}: Definition-elementin alta puuttuu Faces`);
+      errors.push(createIssue(`Surface #${surfaceNo}: Definition-elementin alta puuttuu Faces`, definition, xmlText, { childName: "Faces" }));
     }
   });
 }
 
-function validateSurfaceSourceDataCoding(nodes, labelPrefix, warnings) {
+function validateSurfaceSourceDataCoding(nodes, labelPrefix, xmlText, warnings) {
   nodes.forEach((node, index) => {
     const itemNo = index + 1;
     const codingFeature = findFirstFeatureByCode(node, "IM_coding");
 
     if (!codingFeature) {
-      warnings.push(`${labelPrefix} #${itemNo}: IM_coding-Feature puuttuu`);
+      warnings.push(createIssue(`${labelPrefix} #${itemNo}: IM_coding-Feature puuttuu`, node, xmlText));
       return;
     }
 
     const labels = extractPropertyLabels(codingFeature);
 
     if (!labels.includes("terrainCoding")) {
-      warnings.push(`${labelPrefix} #${itemNo}: terrainCoding puuttuu IM_coding-Featureltä`);
+      warnings.push(createIssue(`${labelPrefix} #${itemNo}: terrainCoding puuttuu IM_coding-Featureltä`, codingFeature, xmlText));
     }
 
     if (!labels.includes("terrainCodingDesc")) {
-      warnings.push(`${labelPrefix} #${itemNo}: terrainCodingDesc puuttuu IM_coding-Featureltä`);
+      warnings.push(createIssue(`${labelPrefix} #${itemNo}: terrainCodingDesc puuttuu IM_coding-Featureltä`, codingFeature, xmlText));
     }
 
-    // surfaceCoding on ohjeen mukaan source datalle valinnainen
     if (!labels.includes("surfaceCoding")) {
-      warnings.push(`${labelPrefix} #${itemNo}: surfaceCoding puuttuu (valinnainen, ilmoitetaan huomautuksena)`);
+      warnings.push(createIssue(`${labelPrefix} #${itemNo}: surfaceCoding puuttuu (valinnainen, ilmoitetaan huomautuksena)`, codingFeature, xmlText));
     }
   });
 }
@@ -429,35 +440,35 @@ function extractPropertyLabels(featureNode) {
     .filter(Boolean);
 }
 
-function validateDocumentAgainstXsdHints(xmlDoc, schemaModel, errors, warnings) {
+function validateDocumentAgainstXsdHints(xmlDoc, xmlText, schemaModel, errors, warnings) {
   const root = xmlDoc.documentElement;
-  validateElementWithSchemaRule(root, "LandXML", schemaModel, "LandXML", errors, warnings);
+  validateElementWithSchemaRule(root, "LandXML", xmlText, schemaModel, "LandXML", errors, warnings);
 
   const project = findFirstElement(xmlDoc, "Project");
   if (project) {
-    validateElementWithSchemaRule(project, "Project", schemaModel, "Project", errors, warnings);
+    validateElementWithSchemaRule(project, "Project", xmlText, schemaModel, "Project", errors, warnings);
   }
 
   const units = findFirstElement(xmlDoc, "Units");
   if (units) {
-    validateElementWithSchemaRule(units, "Units", schemaModel, "Units", errors, warnings);
+    validateElementWithSchemaRule(units, "Units", xmlText, schemaModel, "Units", errors, warnings);
   }
 }
 
-function validateAlignmentContent(xmlDoc, schemaModel, errors, warnings) {
+function validateAlignmentContent(xmlDoc, xmlText, schemaModel, errors, warnings) {
   const alignmentsContainer = findFirstElement(xmlDoc, "Alignments");
   const alignmentList = findElements(xmlDoc, "Alignment");
 
   if (!alignmentsContainer && alignmentList.length > 0) {
-    warnings.push("Alignment-elementtejä löytyi, mutta niitä kokoavaa Alignments-elementtiä ei löytynyt");
+    warnings.push(createIssue("Alignment-elementtejä löytyi, mutta niitä kokoavaa Alignments-elementtiä ei löytynyt", alignmentList[0], xmlText));
   }
 
   if (alignmentsContainer && schemaModel) {
-    validateElementWithSchemaRule(alignmentsContainer, "Alignments", schemaModel, "Alignments", errors, warnings);
+    validateElementWithSchemaRule(alignmentsContainer, "Alignments", xmlText, schemaModel, "Alignments", errors, warnings);
   }
 
   if (alignmentList.length === 0) {
-    errors.push("Tiedosto näyttää linjausaineistolta, mutta Alignment-elementtejä ei löytynyt");
+    errors.push(createIssue("Tiedosto näyttää linjausaineistolta, mutta Alignment-elementtejä ei löytynyt", xmlDoc.documentElement, xmlText));
     return;
   }
 
@@ -465,12 +476,12 @@ function validateAlignmentContent(xmlDoc, schemaModel, errors, warnings) {
     const number = index + 1;
 
     if (schemaModel) {
-      validateElementWithSchemaRule(alignment, "Alignment", schemaModel, `Alignment #${number}`, errors, warnings);
+      validateElementWithSchemaRule(alignment, "Alignment", xmlText, schemaModel, `Alignment #${number}`, errors, warnings);
     }
 
     const coordGeom = findFirstChildElement(alignment, "CoordGeom");
     if (!coordGeom) {
-      errors.push(`Alignment #${number}: pakollinen CoordGeom-elementti puuttuu`);
+      errors.push(createIssue(`Alignment #${number}: pakollinen CoordGeom-elementti puuttuu`, alignment, xmlText, { childName: "CoordGeom" }));
       return;
     }
 
@@ -479,16 +490,16 @@ function validateAlignmentContent(xmlDoc, schemaModel, errors, warnings) {
     const spirals = findChildElementsDeep(coordGeom, "Spiral");
 
     if (lines.length + curves.length + spirals.length === 0) {
-      errors.push(`Alignment #${number}: CoordGeom ei sisällä geometriaelementtejä (Line/Curve/Spiral)`);
+      errors.push(createIssue(`Alignment #${number}: CoordGeom ei sisällä geometriaelementtejä (Line/Curve/Spiral)`, coordGeom, xmlText));
     }
   });
 }
 
-function validateSurfaceContent(xmlDoc, schemaModel, errors, warnings) {
+function validateSurfaceContent(xmlDoc, xmlText, schemaModel, errors, warnings) {
   const surfaces = findElements(xmlDoc, "Surface");
 
   if (surfaces.length === 0) {
-    errors.push("Tiedosto näyttää pintamallilta, mutta Surface-elementtejä ei löytynyt");
+    errors.push(createIssue("Tiedosto näyttää pintamallilta, mutta Surface-elementtejä ei löytynyt", xmlDoc.documentElement, xmlText));
     return;
   }
 
@@ -496,22 +507,21 @@ function validateSurfaceContent(xmlDoc, schemaModel, errors, warnings) {
     const number = index + 1;
 
     if (schemaModel) {
-      validateElementWithSchemaRule(surface, "Surface", schemaModel, `Surface #${number}`, errors, warnings);
+      validateElementWithSchemaRule(surface, "Surface", xmlText, schemaModel, `Surface #${number}`, errors, warnings);
     }
 
     const definition = findFirstChildElement(surface, "Definition");
     if (!definition) {
-      errors.push(`Surface #${number}: pakollinen Definition-elementti puuttuu`);
-      return;
+      errors.push(createIssue(`Surface #${number}: pakollinen Definition-elementti puuttuu`, surface, xmlText, { childName: "Definition" }));
     }
   });
 }
 
-function validatePipeContent(xmlDoc, schemaModel, errors, warnings) {
+function validatePipeContent(xmlDoc, xmlText, schemaModel, errors, warnings) {
   const networks = findElements(xmlDoc, "PipeNetwork");
 
   if (networks.length === 0) {
-    errors.push("Tiedosto näyttää verkostoaineistolta, mutta PipeNetwork-elementtejä ei löytynyt");
+    errors.push(createIssue("Tiedosto näyttää verkostoaineistolta, mutta PipeNetwork-elementtejä ei löytynyt", xmlDoc.documentElement, xmlText));
     return;
   }
 
@@ -519,16 +529,16 @@ function validatePipeContent(xmlDoc, schemaModel, errors, warnings) {
     const number = index + 1;
 
     if (schemaModel) {
-      validateElementWithSchemaRule(network, "PipeNetwork", schemaModel, `PipeNetwork #${number}`, errors, warnings);
+      validateElementWithSchemaRule(network, "PipeNetwork", xmlText, schemaModel, `PipeNetwork #${number}`, errors, warnings);
     }
   });
 }
 
-function validatePointContent(xmlDoc, schemaModel, errors, warnings) {
+function validatePointContent(xmlDoc, xmlText, schemaModel, errors, warnings) {
   const cgPoints = findElements(xmlDoc, "CgPoint");
 
   if (cgPoints.length === 0) {
-    errors.push("Tiedosto näyttää pisteaineistolta, mutta CgPoint-elementtejä ei löytynyt");
+    errors.push(createIssue("Tiedosto näyttää pisteaineistolta, mutta CgPoint-elementtejä ei löytynyt", xmlDoc.documentElement, xmlText));
     return;
   }
 
@@ -536,25 +546,25 @@ function validatePointContent(xmlDoc, schemaModel, errors, warnings) {
     const number = index + 1;
 
     if (schemaModel) {
-      validateElementWithSchemaRule(point, "CgPoint", schemaModel, `CgPoint #${number}`, errors, warnings);
+      validateElementWithSchemaRule(point, "CgPoint", xmlText, schemaModel, `CgPoint #${number}`, errors, warnings);
     }
 
     const text = normalizeWhitespace(point.textContent);
     if (!text) {
-      errors.push(`CgPoint #${number}: koordinaattisisältö puuttuu`);
+      errors.push(createIssue(`CgPoint #${number}: koordinaattisisältö puuttuu`, point, xmlText));
     }
   });
 }
 
-function validateGenericLandXMLContent(xmlDoc, schemaModel, errors, warnings) {
+function validateGenericLandXMLContent(xmlDoc, xmlText, schemaModel, errors, warnings) {
   const root = xmlDoc.documentElement;
 
   if (!findFirstChildElement(root, "Units")) {
-    warnings.push("Units-elementtiä ei löytynyt juurielementin alta");
+    warnings.push(createIssue("Units-elementtiä ei löytynyt juurielementin alta", root, xmlText, { childName: "Units" }));
   }
 
   if (schemaModel) {
-    validateElementWithSchemaRule(root, "LandXML", schemaModel, "LandXML", errors, warnings);
+    validateElementWithSchemaRule(root, "LandXML", xmlText, schemaModel, "LandXML", errors, warnings);
   }
 }
 
@@ -791,7 +801,7 @@ function parseModelGroup(groupNode, rule, treatAsChoice) {
   }
 }
 
-function validateElementWithSchemaRule(xmlElement, schemaElementName, schemaModel, label, errors, warnings) {
+function validateElementWithSchemaRule(xmlElement, schemaElementName, xmlText, schemaModel, label, errors, warnings) {
   const rule = getSchemaRule(schemaElementName, schemaModel);
   if (!rule) {
     return;
@@ -799,22 +809,135 @@ function validateElementWithSchemaRule(xmlElement, schemaElementName, schemaMode
 
   rule.requiredAttributes.forEach((attrName) => {
     if (!xmlElement.hasAttribute(attrName)) {
-      warnings.push(`${label}: XSD:n mukaan pakollinen attribuutti puuttuu: ${attrName}`);
+      warnings.push(createIssue(`${label}: XSD:n mukaan pakollinen attribuutti puuttuu: ${attrName}`, xmlElement, xmlText, { attributeName: attrName }));
     }
   });
 
   rule.requiredChildren.forEach((childName) => {
     if (!findFirstChildElement(xmlElement, childName)) {
-      errors.push(`${label}: XSD:n mukaan pakollinen alielementti puuttuu: ${childName}`);
+      errors.push(createIssue(`${label}: XSD:n mukaan pakollinen alielementti puuttuu: ${childName}`, xmlElement, xmlText, { childName }));
     }
   });
 
   rule.requiredChoices.forEach((choiceNames) => {
     const found = choiceNames.some((name) => findFirstChildElement(xmlElement, name));
     if (!found) {
-      errors.push(`${label}: XSD:n mukaan vähintään yksi näistä alielementeistä vaaditaan: ${choiceNames.join(", ")}`);
+      errors.push(createIssue(`${label}: XSD:n mukaan vähintään yksi näistä alielementeistä vaaditaan: ${choiceNames.join(", ")}`, xmlElement, xmlText));
     }
   });
+}
+
+function createIssue(message, element = null, xmlText = "", options = {}) {
+  const location = buildLocationInfo(element, xmlText, options);
+  return {
+    message,
+    line: location.line,
+    path: location.path,
+    snippet: location.snippet
+  };
+}
+
+function buildLocationInfo(element, xmlText, options = {}) {
+  if (!element) {
+    return {
+      line: null,
+      path: "",
+      snippet: ""
+    };
+  }
+
+  const path = buildElementPath(element);
+  const line = estimateLineNumber(xmlText, element, options);
+  const snippet = buildSnippet(element, options);
+
+  return { line, path, snippet };
+}
+
+function buildElementPath(element) {
+  const parts = [];
+  let current = element;
+
+  while (current && current.nodeType === 1) {
+    const name = getLocalName(current);
+    const siblings = current.parentElement
+      ? Array.from(current.parentElement.children).filter((child) => getLocalName(child) === name)
+      : [current];
+    const index = siblings.indexOf(current) + 1;
+    parts.unshift(`${name}[${index}]`);
+    current = current.parentElement;
+  }
+
+  return "/" + parts.join("/");
+}
+
+function estimateLineNumber(xmlText, element, options = {}) {
+  if (!xmlText || !element) {
+    return null;
+  }
+
+  const tagName = getLocalName(element);
+  const candidates = [];
+
+  if (options.childName) {
+    candidates.push(`<${tagName}`);
+  }
+
+  if (options.attributeName) {
+    candidates.push(`${options.attributeName}=`);
+    candidates.push(`<${tagName}`);
+  }
+
+  candidates.push(`<${tagName}`);
+
+  for (const candidate of candidates) {
+    const idx = xmlText.indexOf(candidate);
+    if (idx >= 0) {
+      return xmlText.slice(0, idx).split(/\r\n|\r|\n/).length;
+    }
+  }
+
+  return null;
+}
+
+function buildSnippet(element, options = {}) {
+  const tagName = getLocalName(element);
+
+  if (options.childName) {
+    return `<${tagName}> ... <${options.childName}>`;
+  }
+
+  if (options.attributeName) {
+    return `<${tagName} ${options.attributeName}="...">`;
+  }
+
+  return `<${tagName}>`;
+}
+
+function formatIssue(issue) {
+  if (typeof issue === "string") {
+    return issue;
+  }
+
+  const parts = [];
+
+  if (issue.line) {
+    parts.push(`rivi ${issue.line}`);
+  }
+
+  if (issue.path) {
+    parts.push(issue.path);
+  }
+
+  let prefix = "";
+  if (parts.length) {
+    prefix = `[${parts.join(" | ")}] `;
+  }
+
+  if (issue.snippet) {
+    return `${prefix}${issue.message}\n  kohta: ${issue.snippet}`;
+  }
+
+  return `${prefix}${issue.message}`;
 }
 
 function findFirstFeatureByCode(parent, code) {
@@ -915,11 +1038,16 @@ function escapeHtml(value) {
 }
 
 function renderResult({ result, rootName, namespace, detectedTypeLabel, versionLabel, errors, warnings, infos }) {
-  const summaryClass = errors.length === 0 ? "success" : "error";
-  const summaryText =
-    errors.length === 0
-      ? "✅ XML läpäisi nykyisen tarkistuksen"
-      : "❌ XML:ssä havaittiin validointiongelmia";
+  let summaryClass = "success";
+  let summaryText = "✅ XML läpäisi tarkistuksen";
+
+  if (errors.length > 0) {
+    summaryClass = "error";
+    summaryText = "❌ XML:ssä havaittiin virheitä";
+  } else if (warnings.length > 0) {
+    summaryClass = "warning";
+    summaryText = "⚠️ XML tarkistettiin, mutta huomautuksia löytyi";
+  }
 
   let html = `<span class="${summaryClass}">${summaryText}</span>\n\n`;
   html += `Root: ${escapeHtml(rootName)}\n`;
@@ -932,11 +1060,11 @@ function renderResult({ result, rootName, namespace, detectedTypeLabel, versionL
   }
 
   if (errors.length) {
-    html += `\n<b>Virheet:</b>\n${escapeHtml(errors.join("\n"))}\n`;
+    html += `\n<b>Virheet:</b>\n${escapeHtml(errors.map(formatIssue).join("\n\n"))}\n`;
   }
 
   if (warnings.length) {
-    html += `\n<b>Huomautukset:</b>\n${escapeHtml(warnings.join("\n"))}\n`;
+    html += `\n<b>Huomautukset:</b>\n${escapeHtml(warnings.map(formatIssue).join("\n\n"))}\n`;
   }
 
   if (!errors.length && !warnings.length) {
