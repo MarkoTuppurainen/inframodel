@@ -5,14 +5,19 @@ const EXPECTED_NAMESPACES = {
   im: "http://buildingsmart.fi/im/404"
 };
 
+const XSD_TEMPLATE_VALUES = {
+  release_directory: "http://buildingsmart.fi/inframodel/404",
+  github_release: "4.2.0"
+};
+
 const XSD_SOURCES = [
   {
     name: "inframodel-raw.xsd",
-    url: "https://cdn.jsdelivr.net/gh/buildingSMART-Finland/InfraModel@4.2.0/schema/inframodel-raw.xsd"
+    url: "https://raw.githubusercontent.com/buildingSMART-Finland/InfraModel/4.2.0/schema/inframodel-raw.xsd"
   },
   {
     name: "im-raw.xsd",
-    url: "https://cdn.jsdelivr.net/gh/buildingSMART-Finland/InfraModel@4.2.0/schema/im-raw.xsd"
+    url: "https://raw.githubusercontent.com/buildingSMART-Finland/InfraModel/4.2.0/schema/im-raw.xsd"
   }
 ];
 
@@ -646,12 +651,14 @@ async function loadSchemaModel() {
         throw new Error(`XSD-tiedoston lataus epäonnistui: ${source.name} (${response.status})`);
       }
 
-      const text = await response.text();
+      const originalText = await response.text();
+      const text = preprocessXsdText(originalText, source.name);
+
       const doc = new DOMParser().parseFromString(text, "application/xml");
       const parseError = doc.querySelector("parsererror");
 
       if (parseError) {
-        throw new Error(`XSD-tiedosto ei ole kelvollinen XML: ${source.name}`);
+        throw new Error(`XSD-tiedosto ei ole kelvollinen XML esikäsittelyn jälkeen: ${source.name}`);
       }
 
       return doc;
@@ -660,6 +667,21 @@ async function loadSchemaModel() {
 
   schemaModelCache = buildSchemaModel(docs);
   return schemaModelCache;
+}
+
+function preprocessXsdText(text, sourceName) {
+  let processed = text;
+
+  processed = processed.replaceAll("{{release_directory}}/im", EXPECTED_NAMESPACES.im);
+  processed = processed.replaceAll("{{release_directory}}", EXPECTED_NAMESPACES.default);
+  processed = processed.replaceAll("{{github_release}}", XSD_TEMPLATE_VALUES.github_release);
+
+  if (sourceName === "im-raw.xsd") {
+    processed = processed.replaceAll(`targetNamespace="${EXPECTED_NAMESPACES.default}/im"`, `targetNamespace="${EXPECTED_NAMESPACES.im}"`);
+    processed = processed.replaceAll(`xmlns:im="${EXPECTED_NAMESPACES.default}/im"`, `xmlns:im="${EXPECTED_NAMESPACES.im}"`);
+  }
+
+  return processed;
 }
 
 function buildSchemaModel(xsdDocs) {
