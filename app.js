@@ -1,29 +1,3 @@
-import * as xmllintModule from "./vendor/xmllint/index-browser.mjs";
-
-// 🔥 alustetaan xmllint oikein
-const xmllint = await xmllintModule.default({
-  locateFile: (file) => {
-    if (file.endsWith(".wasm")) {
-      return "./vendor/xmllint/" + file;
-    }
-    return file;
-  },
-  workerURL: "./vendor/xmllint/xmllint-browser.mjs"
-});
-
-const SCHEMA_SOURCES = [
-  {
-    fileName: "inframodel-raw.xsd",
-    url: "https://cdn.jsdelivr.net/gh/buildingSMART-Finland/InfraModel@4.2.0/schema/inframodel-raw.xsd"
-  },
-  {
-    fileName: "im-raw.xsd",
-    url: "https://cdn.jsdelivr.net/gh/buildingSMART-Finland/InfraModel@4.2.0/schema/im-raw.xsd"
-  }
-];
-
-let schemaCache = null;
-
 window.validateXML = validateXML;
 
 async function validateXML() {
@@ -40,6 +14,7 @@ async function validateXML() {
   const file = fileInput.files[0];
   const xmlText = await file.text();
 
+  // 🔹 1. XML syntaksin tarkistus
   const parser = new DOMParser();
   const xmlDoc = parser.parseFromString(xmlText, "application/xml");
   const errorNode = xmlDoc.querySelector("parsererror");
@@ -49,82 +24,62 @@ async function validateXML() {
     return;
   }
 
-  try {
-    const schemaFiles = await loadSchemas();
+  // 🔹 2. InfraModel-perustarkistus
+  const root = xmlDoc.documentElement;
+  const rootName = root.nodeName;
 
-    const validationResult = await xmllint.validateXML({
-      xml: [
-        {
-          fileName: sanitizeFileName(file.name || "uploaded.xml"),
-          contents: xmlText
-        }
-      ],
-      schema: schemaFiles
-    });
+  // InfraModel XML:ssä tyypillisiä rootteja
+  const validRoots = ["InfraModel", "IM", "LandXML"];
 
-    if (validationResult.valid) {
-      result.innerHTML = `<span class="success">✅ XML validoitui InfraModel 4.2.0 -skeemaa vasten</span>`;
-      return;
-    }
+  if (!validRoots.includes(rootName)) {
+    result.innerHTML = `<span class="error">
+❌ XML ei näytä InfraModel-tiedostolta
 
-    const formattedErrors = formatValidationErrors(validationResult.errors);
-    result.innerHTML = `<span class="error">❌ XML ei läpäissyt InfraModel-validointia:\n${escapeHtml(formattedErrors)}</span>`;
-  } catch (error) {
-    result.innerHTML = `<span class="error">Virhe validoinnissa:\n${escapeHtml(String(error))}</span>`;
-  }
-}
+Root-elementti: ${escapeHtml(rootName)}
 
-async function loadSchemas() {
-  if (schemaCache) {
-    return schemaCache;
+Odotettiin jotain näistä:
+- InfraModel
+- IM
+- LandXML
+</span>`;
+    return;
   }
 
-  const responses = await Promise.all(
-    SCHEMA_SOURCES.map(async (schema) => {
-      const response = await fetch(schema.url, { cache: "force-cache" });
+  // 🔹 3. Namespace tarkistus
+  const namespace = root.namespaceURI || "ei määritelty";
 
-      if (!response.ok) {
-        throw new Error(`Skeeman lataus epäonnistui: ${schema.fileName} (${response.status})`);
-      }
+  if (!namespace || namespace === "") {
+    result.innerHTML = `<span class="error">
+❌ XML:stä puuttuu namespace
 
-      const contents = await response.text();
-
-      return {
-        fileName: schema.fileName,
-        contents
-      };
-    })
-  );
-
-  schemaCache = responses;
-  return schemaCache;
-}
-
-function formatValidationErrors(errors) {
-  if (!errors || !errors.length) {
-    return "Tuntematon validointivirhe.";
+InfraModel vaatii määritellyn namespacen.
+</span>`;
+    return;
   }
 
-  return errors
-    .map((error, index) => {
-      const lineInfo = error.loc?.lineNumber ? `rivi ${error.loc.lineNumber}` : "rivi tuntematon";
-      const fileInfo = error.loc?.fileName ? `${error.loc.fileName}, ${lineInfo}` : lineInfo;
-      const message = error.message || error.rawMessage || "Tuntematon virhe";
-      return `${index + 1}. ${fileInfo}: ${message}`;
-    })
-    .join("\n");
-}
+  // 🔹 4. Perusrakenne (esimerkki)
+  const hasProject = xmlDoc.getElementsByTagName("Project").length > 0;
+  const hasAlignment = xmlDoc.getElementsByTagName("Alignment").length > 0;
 
-function sanitizeFileName(fileName) {
-  const cleaned = fileName
-    .replace(/[^\w.\-]/g, "_")
-    .replace(/^\-+/, "");
+  let warnings = [];
 
-  if (!cleaned || cleaned.startsWith("-") || cleaned.includes(" -")) {
-    return "uploaded.xml";
+  if (!hasProject) {
+    warnings.push("⚠️ Project-elementti puuttuu");
   }
 
-  return cleaned;
+  if (!hasAlignment) {
+    warnings.push("⚠️ Alignment-elementtiä ei löytynyt");
+  }
+
+  // 🔹 Lopputulos
+  result.innerHTML = `
+<span class="success">✅ XML on hyvin muodostettu ja muistuttaa InfraModel-rakennetta</span>
+
+Root: ${escapeHtml(rootName)}
+Namespace: ${escapeHtml(namespace)}
+
+${warnings.length ? warnings.join("\n") : "Ei huomautuksia"}
+`;
 }
 
 function escapeHtml(value) {
