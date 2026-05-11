@@ -12,8 +12,8 @@ const VERSION_CONFIG = {
   },
   "4.1": {
     label: "InfraModel 4.1",
-    defaultNamespace: "http://buildingsmart.fi/inframodel/404",
-    imNamespace: "http://buildingsmart.fi/im/404",
+    defaultNamespace: "http://buildingsmart.fi/inframodel/410",
+    imNamespace: "http://buildingsmart.fi/im/410",
     schemas: {
       inframodel: "./schemas/4.1/inframodel.xsd",
       im: "./schemas/4.1/im.xsd"
@@ -51,67 +51,62 @@ async function validateXML() {
     return;
   }
 
-  const file = fileInput.files[0];
-  const xmlText = await file.text();
+  const files = Array.from(fileInput.files);
+  const reports = [];
+  let passCount = 0;
+  let warningCount = 0;
+  let errorCount = 0;
 
-  const parser = new DOMParser();
-  const xmlDoc = parser.parseFromString(xmlText, "application/xml");
-  const errorNode = xmlDoc.querySelector("parsererror");
+  for (const file of files) {
+    const xmlText = await file.text();
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlText, "application/xml");
+    const errorNode = xmlDoc.querySelector("parsererror");
 
-  if (errorNode) {
-    result.innerHTML = `<span class="error">❌ XML ei ole hyvin muodostettu:\n${escapeHtml(errorNode.textContent)}</span>`;
-    return;
-  }
-
-  const errors = [];
-  const warnings = [];
-  const infos = [];
-
-  const root = xmlDoc.documentElement;
-  const rootName = getLocalName(root);
-  const namespace = root.namespaceURI || "";
-
-  const detectedVersion = detectInfraModelVersion(xmlDoc);
-  infos.push(`Tunnistettu versio: ${detectedVersion.label}`);
-
-  let schemaModel = null;
-  let versionConfig = null;
-
-  if (detectedVersion.key && VERSION_CONFIG[detectedVersion.key]) {
-    versionConfig = VERSION_CONFIG[detectedVersion.key];
-
-    try {
-      schemaModel = await loadSchemaModelForVersion(detectedVersion.key);
-      infos.push(`Version ${detectedVersion.key} skeemat ladattu paikallisesti`);
-    } catch (error) {
-      warnings.push(createIssue(`Version ${detectedVersion.key} skeemojen lataus epäonnistui: ${String(error)}`));
+    if (errorNode) {
+      reports.push({ fileName: file.name, rootName: "tuntematon", namespace: "", detectedTypeLabel: "tuntematon", versionLabel: "tuntematon", errors: [createIssue(`XML ei ole hyvin muodostettu: ${errorNode.textContent || ""}`)], warnings: [], infos: [] });
+      errorCount += 1;
+      continue;
     }
-  } else {
-    warnings.push(createIssue("Tiedoston versiota ei pystytty tunnistamaan tuettuihin versioihin 4.0.4 / 4.1 / 4.2.0"));
+
+    const errors = [];
+    const warnings = [];
+    const infos = [];
+    const root = xmlDoc.documentElement;
+    const rootName = getLocalName(root);
+    const namespace = root.namespaceURI || "";
+    const detectedVersion = detectInfraModelVersion(xmlDoc);
+    infos.push(`Tunnistettu versio: ${detectedVersion.label}`);
+
+    let schemaModel = null;
+    let versionConfig = null;
+    if (detectedVersion.key && VERSION_CONFIG[detectedVersion.key]) {
+      versionConfig = VERSION_CONFIG[detectedVersion.key];
+      try {
+        schemaModel = await loadSchemaModelForVersion(detectedVersion.key);
+        infos.push(`Version ${detectedVersion.key} skeemat ladattu paikallisesti`);
+      } catch (error) {
+        warnings.push(createIssue(`Version ${detectedVersion.key} skeemojen lataus epäonnistui: ${String(error)}`));
+      }
+    } else {
+      warnings.push(createIssue("Tiedoston versiota ei pystytty tunnistamaan tuettuihin versioihin 4.0.4 / 4.1 / 4.2.0"));
+    }
+
+    validateGeneralStructure(xmlDoc, xmlText, versionConfig, errors, warnings, infos);
+    const detectedType = detectInfraModelContentType(xmlDoc);
+    infos.push(`Tunnistettu sisältötyyppi: ${detectedType.label}`);
+    if (schemaModel) validateDocumentAgainstXsdHints(xmlDoc, xmlText, schemaModel, errors, warnings);
+    validateByDetectedType(xmlDoc, xmlText, detectedType.key, schemaModel, errors, warnings);
+    validateApplicationGuidelineRules(xmlDoc, xmlText, detectedType.key, errors, warnings);
+
+    if (errors.length > 0) errorCount += 1;
+    else if (warnings.length > 0) warningCount += 1;
+    else passCount += 1;
+
+    reports.push({ fileName: file.name, rootName, namespace, detectedTypeLabel: detectedType.label, versionLabel: detectedVersion.label, errors, warnings, infos });
   }
 
-  validateGeneralStructure(xmlDoc, xmlText, versionConfig, errors, warnings, infos);
-
-  const detectedType = detectInfraModelContentType(xmlDoc);
-  infos.push(`Tunnistettu sisältötyyppi: ${detectedType.label}`);
-
-  if (schemaModel) {
-    validateDocumentAgainstXsdHints(xmlDoc, xmlText, schemaModel, errors, warnings);
-  }
-
-  validateByDetectedType(xmlDoc, xmlText, detectedType.key, schemaModel, errors, warnings);
-  validateApplicationGuidelineRules(xmlDoc, xmlText, detectedType.key, errors, warnings);
-
-  renderResult({
-    result,
-    rootName,
-    namespace,
-    detectedTypeLabel: detectedType.label,
-    versionLabel: detectedVersion.label,
-    errors,
-    warnings,
-    infos
-  });
+  renderBatchResult({ result, reports, totals: { total: files.length, passCount, warningCount, errorCount } });
 }
 
 function detectInfraModelVersion(xmlDoc) {
@@ -468,7 +463,7 @@ function validateSurfaceBreakLineCoding(nodes, labelPrefix, xmlText, warnings) {
 }
 
 function validateSingleBreakLineCoding(breakLineNode, labelPrefix, xmlText, warnings) {
-  const codingFeature = findCodingFeature(breakLineNode, "IM_coding");
+  const codingFeature = findCodingFeature(breakLineNode, "IM_coding") || findCodingFeature(breakLineNode, "IM_coding-feature");
 
   if (!codingFeature) {
     warnings.push(createIssue(`${labelPrefix}: IM_coding-Feature puuttuu`, breakLineNode, xmlText));
@@ -506,8 +501,12 @@ function validateSingleBreakLineCoding(breakLineNode, labelPrefix, xmlText, warn
 }
 
 function findCodingFeature(node, code) {
+  const candidateCodes = [code, code.toLowerCase(), code.toUpperCase()].filter(Boolean);
+  const deepMatch = findChildElementsDeep(node, "Feature").find((feature) => candidateCodes.includes((feature.getAttribute("code") || "").trim()));
+  if (deepMatch) return deepMatch;
+
   const directFeature = findDirectChildren(node, "Feature").find(
-    (feature) => (feature.getAttribute("code") || "") === code
+    (feature) => candidateCodes.includes((feature.getAttribute("code") || "").trim())
   );
   if (directFeature) {
     return directFeature;
@@ -516,7 +515,7 @@ function findCodingFeature(node, code) {
   const featuresContainer = findDirectChildren(node, "Features")[0] || null;
   if (featuresContainer) {
     const nestedFeature = findDirectChildren(featuresContainer, "Feature").find(
-      (feature) => (feature.getAttribute("code") || "") === code
+      (feature) => candidateCodes.includes((feature.getAttribute("code") || "").trim())
     );
     if (nestedFeature) {
       return nestedFeature;
@@ -1022,7 +1021,7 @@ function buildElementPath(element) {
 }
 
 function estimateLineNumber(xmlText, element, path, options = {}) {
-  if (!xmlText || !element) {
+  if (!xmlText || !element || xmlText.length > 1000000) {
     return null;
   }
 
@@ -1218,7 +1217,7 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;");
 }
 
-function renderResult({ result, rootName, namespace, detectedTypeLabel, versionLabel, errors, warnings, infos }) {
+function renderResult({ rootName, namespace, detectedTypeLabel, versionLabel, errors, warnings, infos }) {
   let summaryClass = "success";
   let summaryText = "✅ XML läpäisi tarkistuksen";
 
@@ -1251,6 +1250,22 @@ function renderResult({ result, rootName, namespace, detectedTypeLabel, versionL
   if (!errors.length && !warnings.length) {
     html += `\nEi huomautuksia.\n`;
   }
+
+  return html;
+}
+
+function renderBatchResult({ result, reports, totals }) {
+  let html = `<b>Yhteenveto:</b>\n`;
+  html += `Tiedostoja: ${totals.total}\n`;
+  html += `Läpäisi ilman huomautuksia: ${totals.passCount}\n`;
+  html += `Sisälsi huomautuksia: ${totals.warningCount}\n`;
+  html += `Sisälsi virheitä: ${totals.errorCount}\n\n`;
+
+  reports.forEach((report, index) => {
+    html += `---\nTiedosto ${index + 1}/${totals.total}: ${escapeHtml(report.fileName)}\n`;
+    html += renderResult(report);
+    html += "\n\n";
+  });
 
   result.innerHTML = html;
 }
