@@ -304,33 +304,10 @@ function validateByDetectedType(xmlDoc, xmlText, typeKey, schemaModel, errors, w
 
 function validateApplicationGuidelineRules(xmlDoc, xmlText, typeKey, errors, warnings) {
   validateUnitsContent(xmlDoc, xmlText, warnings);
-  validateFeatureDictionaryVersion(xmlDoc, xmlText, warnings);
 
   if (typeKey === "surfaces") {
     validateSurfaceGuidelineRules(xmlDoc, xmlText, errors, warnings);
   }
-}
-
-function validateFeatureDictionaryVersion(xmlDoc, xmlText, warnings) {
-  const dictionaries = findElements(xmlDoc, "FeatureDictionary");
-  if (!dictionaries.length) {
-    return;
-  }
-
-  dictionaries.forEach((dictionary, index) => {
-    const value = (dictionary.getAttribute("version") || "").trim();
-    const itemLabel = `FeatureDictionary #${index + 1}`;
-    if (!value) {
-      warnings.push(createIssue(`${itemLabel}: version-attribuutti puuttuu`, dictionary, xmlText, { attributeName: "version" }));
-      return;
-    }
-
-    const normalized = normalizeVersionString(value);
-    const supported = ["4.0.4", "4.1", "4.1.0", "4.2", "4.2.0"];
-    if (!supported.includes(normalized)) {
-      warnings.push(createIssue(`${itemLabel}: version-attribuutin arvo ei ole tuettu InfraModel-versio (arvo: ${formatPropertyValue(value)})`, dictionary, xmlText, { attributeName: "version" }));
-    }
-  });
 }
 
 function validateUnitsContent(xmlDoc, xmlText, warnings) {
@@ -1006,8 +983,7 @@ function createIssue(message, element = null, xmlText = "", options = {}) {
     message,
     line: location.line,
     path: location.path,
-    snippet: location.snippet,
-    anchor: location.anchor
+    snippet: location.snippet
   };
 }
 
@@ -1023,9 +999,8 @@ function buildLocationInfo(element, xmlText, options = {}) {
   const path = buildElementPath(element);
   const line = estimateLineNumber(xmlText, element, path, options);
   const snippet = buildSnippet(element, options);
-  const anchor = buildLocationAnchor(element);
 
-  return { line, path, snippet, anchor };
+  return { line, path, snippet };
 }
 
 function buildElementPath(element) {
@@ -1116,20 +1091,6 @@ function buildSnippet(element, options = {}) {
   return `<${tagName}>`;
 }
 
-function buildLocationAnchor(element) {
-  const candidates = ["name", "id", "code", "label", "desc"];
-  const details = [];
-
-  candidates.forEach((attr) => {
-    const value = (element.getAttribute(attr) || "").trim();
-    if (value) {
-      details.push(`${attr}="${value}"`);
-    }
-  });
-
-  return details.join(", ");
-}
-
 function formatIssue(issue) {
   if (typeof issue === "string") {
     return issue;
@@ -1151,11 +1112,7 @@ function formatIssue(issue) {
   }
 
   if (issue.snippet) {
-    let locationText = `  kohta: ${issue.snippet}`;
-    if (issue.anchor) {
-      locationText += ` (${issue.anchor})`;
-    }
-    return `${prefix}${issue.message}\n${locationText}`;
+    return `${prefix}${issue.message}\n  kohta: ${issue.snippet}`;
   }
 
   return `${prefix}${issue.message}`;
@@ -1247,10 +1204,6 @@ function getLocalName(element) {
 
 function normalizeWhitespace(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
-}
-
-function normalizeVersionString(value) {
-  return String(value || "").trim().replace(/^v/i, "");
 }
 
 function escapeRegExp(value) {
